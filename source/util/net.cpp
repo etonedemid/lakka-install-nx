@@ -32,7 +32,8 @@ struct FileWriteCtx {
 static size_t fileWriteCb(void* contents, size_t size, size_t nmemb, void* userp)
 {
     auto* ctx = static_cast<FileWriteCtx*>(userp);
-    return fwrite(contents, size, nmemb, ctx->fp);
+    size_t written = fwrite(contents, size, nmemb, ctx->fp);
+    return written * size;
 }
 
 static int curlProgressCb(void* clientp,
@@ -117,6 +118,8 @@ bool downloadFile(const std::string& url,
     if (!fp)
         return false;
 
+    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
+
     FileWriteCtx ctx{fp, nullptr, progressCb};
 
     CURL* curl = curl_easy_init();
@@ -136,6 +139,9 @@ bool downloadFile(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 256L * 1024L);
+    curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
@@ -215,6 +221,8 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
         return;
     }
 
+    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
+
     FileWriteCtx ctx{fp, this, nullptr};
 
     CURL* curl = curl_easy_init();
@@ -239,6 +247,9 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 256L * 1024L);
+    curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
