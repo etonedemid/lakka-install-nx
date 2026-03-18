@@ -1,0 +1,7 @@
+build/
+*.nro
+*.nacp
+*.elf
+*.pfs0
+*.nso
+lib/lzma/
