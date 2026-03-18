@@ -42,7 +42,7 @@ static size_t fileWriteCb(void* contents, size_t size, size_t nmemb, void* userp
 // enough headroom to sustain ~50 MB/s on 802.11ac.
 static int sockoptCb(void* /*clientp*/, curl_socket_t curlfd, curlsocktype /*purpose*/)
 {
-    int rcvbuf = 4 * 1024 * 1024;
+    int rcvbuf = 8 * 1024 * 1024;
     setsockopt(curlfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
     return CURL_SOCKOPT_OK;
 }
@@ -129,7 +129,7 @@ bool downloadFile(const std::string& url,
     if (!fp)
         return false;
 
-    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
+    setvbuf(fp, nullptr, _IOFBF, 4 * 1024 * 1024);
 
     FileWriteCtx ctx{fp, nullptr, progressCb};
 
@@ -236,7 +236,7 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
         return;
     }
 
-    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
+    setvbuf(fp, nullptr, _IOFBF, 4 * 1024 * 1024);
 
     FileWriteCtx ctx{fp, this, nullptr};
 
