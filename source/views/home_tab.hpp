@@ -23,7 +23,6 @@ class HomeTab : public brls::List
     brls::ListItem* m_itemInstalledVersion = nullptr;
     brls::ListItem* m_itemCheckUpdate      = nullptr;
     brls::ListItem* m_itemStatus           = nullptr;
-    brls::ListItem* m_itemReboot           = nullptr;
     brls::ListItem* m_itemUninstall        = nullptr;
 
     // Async state

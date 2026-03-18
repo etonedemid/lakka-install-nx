@@ -3,7 +3,6 @@
 #include "install_page.hpp"
 
 #include <borealis.hpp>
-#include <switch.h>
 #include <algorithm>
 #include <cstdio>
 #include <sys/stat.h>
@@ -36,7 +35,8 @@ HomeTab::HomeTab()
     std::string ver = g_config.getInstalledVersion();
     std::string ch  = g_config.getInstalledChannel();
 
-    m_itemInstalledVersion = new brls::ListItem("Installed Version");
+    m_itemInstalledVersion = new brls::ListItem("Installed Version",
+        "The currently installed Lakka version on this SD card.");
     if (!ver.empty())
         m_itemInstalledVersion->setValue(ver + " (" + ch + ")");
     else
@@ -56,28 +56,6 @@ HomeTab::HomeTab()
     m_itemStatus = new brls::ListItem("Status");
     m_itemStatus->setValue("Ready");
 
-    // Add to the list
-    this->addView(new brls::Header("Current Installation"));
-    this->addView(m_itemInstalledVersion);
-    this->addView(new brls::ListItemGroupSpacing(true));
-    this->addView(new brls::Header("Quick Actions"));
-    this->addView(m_itemCheckUpdate);
-    this->addView(new brls::ListItemGroupSpacing(true));
-
-    // Reboot into Lakka — only useful if something is installed
-    m_itemReboot = new brls::ListItem("Reboot into Lakka",
-        "Save all data, then reboot the Switch. Your bootloader will load Lakka.");
-    m_itemReboot->getClickEvent()->subscribe([this](brls::View*) {
-        brls::Dialog* dlg = new brls::Dialog(
-            "The Switch will reboot now.\nMake sure Lakka is set up in your bootloader (Hekate).");
-        dlg->addButton("Reboot", [](brls::View*) {
-            bpcRebootSystem();
-        });
-        dlg->addButton("Cancel", [](brls::View*) {});
-        dlg->setCancelable(true);
-        dlg->open();
-    });
-
     // Uninstall Lakka
     m_itemUninstall = new brls::ListItem("Uninstall Lakka",
         "Remove all Lakka files from the SD card using the install manifest.");
@@ -85,11 +63,14 @@ HomeTab::HomeTab()
         this->confirmUninstall();
     });
 
-    this->addView(new brls::Header("Manage Installation"));
-    this->addView(m_itemReboot);
+    // Add to the list
+    this->addView(new brls::Header("Current Installation"));
+    this->addView(m_itemInstalledVersion);
+    this->addView(new brls::ListItemGroupSpacing(true));
+    this->addView(new brls::Header("Actions"));
+    this->addView(m_itemCheckUpdate);
     this->addView(m_itemUninstall);
     this->addView(new brls::ListItemGroupSpacing(true));
-
     this->addView(m_itemStatus);
 }
 
@@ -173,7 +154,7 @@ void HomeTab::checkForUpdate()
         if (installed.empty())
         {
             m_itemCheckUpdate->setValue("Latest: " + m_latestVersionStr);
-            m_itemStatus->setValue("Not installed — use Install Latest");
+            m_itemStatus->setValue("Not installed — go to Stable or Nightly tab to install");
         }
         else if (installed == m_latestVersionStr)
         {
