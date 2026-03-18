@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <sys/socket.h>
 
 // Global mutex: mbedtls (the Switch's TLS backend) is not safe to use from
 // multiple threads simultaneously.  Serialising all curl operations prevents
@@ -34,6 +35,16 @@ static size_t fileWriteCb(void* contents, size_t size, size_t nmemb, void* userp
     auto* ctx = static_cast<FileWriteCtx*>(userp);
     size_t written = fwrite(contents, size, nmemb, ctx->fp);
     return written * size;
+}
+
+// Enlarge the TCP receive buffer so the kernel can absorb bursts without
+// stalling the sender.  4 MiB is well within libnx limits and gives curl
+// enough headroom to sustain ~50 MB/s on 802.11ac.
+static int sockoptCb(void* /*clientp*/, curl_socket_t curlfd, curlsocktype /*purpose*/)
+{
+    int rcvbuf = 4 * 1024 * 1024;
+    setsockopt(curlfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    return CURL_SOCKOPT_OK;
 }
 
 static int curlProgressCb(void* clientp,
@@ -139,9 +150,11 @@ bool downloadFile(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 256L * 1024L);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 512L * 1024L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockoptCb);
+    curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)(50L * 1024L * 1024L));
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
@@ -247,9 +260,11 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
-    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 256L * 1024L);
+    curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 512L * 1024L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockoptCb);
+    curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)(50L * 1024L * 1024L));
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_LIMIT, 1000L);
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
