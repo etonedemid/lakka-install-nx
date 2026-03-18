@@ -73,5 +73,11 @@ class InstallPage : public brls::View
     retro_time_t             m_lastFrameTime{0};
     int                      m_progressBarY{0};  // set in layout(), read in draw()
 
+    // --- extraction stuck detection ---
+    size_t                   m_extractLastIdx{(size_t)-1};
+    retro_time_t             m_extractStuckSince{0};
+    bool                     m_extractStuck{false};
+    retro_time_t             m_extractStartTime{0};
+
     brls::RepeatingTask*     m_pollTask = nullptr;
 };

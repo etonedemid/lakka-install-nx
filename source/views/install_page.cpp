@@ -145,9 +145,11 @@ void InstallPage::draw(NVGcontext* vg, int x, int y,
     nvgFillColor(vg, nvgRGBA(128, 128, 128, 55));
     nvgFill(vg);
 
-    bool deterministic = (m_dlTotal > 0);
+    bool deterministic = (m_progressPct > 0.0f &&
+                          (m_state == State::DOWNLOADING ||
+                           m_state == State::EXTRACTING));
 
-    if (deterministic && m_progressPct > 0.0f) {
+    if (deterministic) {
         // Deterministic fill with gradient
         float fillW = std::max(barR * 2, barW * (m_progressPct / 100.0f));
         NVGpaint paint = nvgLinearGradient(vg,
@@ -158,9 +160,58 @@ void InstallPage::draw(NVGcontext* vg, int x, int y,
         nvgRoundedRect(vg, barX, barY, fillW, barH, barR);
         nvgFillPaint(vg, paint);
         nvgFill(vg);
-    } else if (!deterministic &&
-               (m_state == State::CONNECTING || m_state == State::DOWNLOADING)) {
-        // Indeterminate: sweeping shimmer ~35% wide
+
+        // When stuck on the same archive file, overlay a shimmer on the
+        // unfilled area so the user knows the CPU is still grinding.
+        if (m_extractStuck && m_state == State::EXTRACTING) {
+            float filledX = barX + barW * (m_progressPct / 100.0f);
+            float restW   = barX + barW - filledX;
+            if (restW > barR) {
+                float sweepFrac = 0.45f;
+                float sweepW    = restW * sweepFrac;
+                float offset    = (restW + sweepW) * m_animPhase - sweepW;
+                float rectX1    = std::max(filledX, filledX + offset);
+                float rectX2    = std::min(barX + barW, filledX + offset + sweepW);
+                if (rectX2 > rectX1) {
+                    NVGpaint sp = nvgLinearGradient(vg,
+                        filledX + offset, barY,
+                        filledX + offset + sweepW, barY,
+                        nvgRGBAf(ctx->theme->highlightColor2.r,
+                                 ctx->theme->highlightColor2.g,
+                                 ctx->theme->highlightColor2.b, 0.0f),
+                        nvgRGBAf(ctx->theme->highlightColor2.r,
+                                 ctx->theme->highlightColor2.g,
+                                 ctx->theme->highlightColor2.b, 0.6f));
+                    nvgBeginPath(vg);
+                    nvgRoundedRect(vg, rectX1, barY, rectX2 - rectX1, barH, barR);
+                    nvgFillPaint(vg, sp);
+                    nvgFill(vg);
+                }
+            }
+        }
+    } else if (m_state == State::CONNECTING ||
+               (m_state == State::DOWNLOADING && m_dlTotal == 0)) {
+        // Indeterminate: sweeping shimmer ~38% wide
+        float sweepFrac = 0.38f;
+        float sweepW    = barW * sweepFrac;
+        float offset    = (barW + sweepW) * m_animPhase - sweepW;
+        float rectX1    = std::max(barX, barX + offset);
+        float rectX2    = std::min(barX + barW, barX + offset + sweepW);
+        if (rectX2 > rectX1) {
+            NVGpaint paint = nvgLinearGradient(vg,
+                barX + offset, barY,
+                barX + offset + sweepW, barY,
+                nvgRGBAf(ctx->theme->highlightColor1.r,
+                         ctx->theme->highlightColor1.g,
+                         ctx->theme->highlightColor1.b, 0.0f),
+                a(ctx->theme->highlightColor1));
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, rectX1, barY, rectX2 - rectX1, barH, barR);
+            nvgFillPaint(vg, paint);
+            nvgFill(vg);
+        }
+    } else if (m_state == State::EXTRACTING) {
+        // Extraction just started (0%), show full shimmer until first progress
         float sweepFrac = 0.38f;
         float sweepW    = barW * sweepFrac;
         float offset    = (barW + sweepW) * m_animPhase - sweepW;
@@ -443,6 +494,22 @@ void InstallPage::startDownload()
             size_t cur   = m_extractTask.getCurrent();
             size_t total = m_extractTask.getTotal();
 
+            // Stuck detection: has the file index moved since last poll?
+            retro_time_t now = cpu_features_get_time_usec();
+            if (cur != m_extractLastIdx) {
+                m_extractLastIdx    = cur;
+                m_extractStuckSince = now;
+                m_extractStuck      = false;
+            } else if (now - m_extractStuckSince > 1000000) { // >1 s
+                m_extractStuck = true;
+            }
+
+            // Elapsed
+            int elapsedSec = static_cast<int>(
+                (now - m_extractStartTime) / 1000000);
+            int em = elapsedSec / 60;
+            int es = elapsedSec % 60;
+
             std::ostringstream stats;
             stats << static_cast<int>(m_progressPct) << "%";
             if (total > 0)
@@ -450,10 +517,20 @@ void InstallPage::startDownload()
             m_statsLabel->setText(stats.str());
 
             std::string fname = m_extractTask.getCurrentFile();
-            // Trim long paths to last component
             auto slash = fname.rfind('/');
             if (slash != std::string::npos) fname = fname.substr(slash + 1);
-            m_detailLabel->setText(fname);
+
+            std::ostringstream detail;
+            if (!fname.empty()) detail << fname;
+            if (m_extractStuck) {
+                // Large file - show a note and elapsed time
+                detail.str(""); detail.clear();
+                if (!fname.empty()) detail << fname << "  ";
+                detail << "(";
+                if (em > 0) detail << em << "m ";
+                detail << es << "s elapsed)";
+            }
+            m_detailLabel->setText(detail.str());
 
             if (m_extractTask.isComplete() && !m_extractTask.hasError()) {
                 brls::Logger::debug("InstallPage: extract complete");
@@ -509,6 +586,10 @@ void InstallPage::startExtract()
 {
     m_state       = State::EXTRACTING;
     m_progressPct = 0.0f;
+    m_extractLastIdx    = (size_t)-1;
+    m_extractStuckSince = 0;
+    m_extractStuck      = false;
+    m_extractStartTime  = cpu_features_get_time_usec();
     m_stageLabel->setText("Step 2/2  \u00b7  Extracting");
     m_titleLabel->setText("Lakka " + m_version.version);
     m_statsLabel->setText("0%");

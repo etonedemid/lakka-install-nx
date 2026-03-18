@@ -153,8 +153,27 @@ bool extract7z(const std::string& archivePath,
             break;
         }
 
+        // Large write buffer for SD card throughput
+        setvbuf(outFile, nullptr, _IOFBF, 512 * 1024);
+
         if (outSizeProcessed > 0) {
-            fwrite(outBuffer + offset, 1, outSizeProcessed, outFile);
+            // Write in 4 MiB chunks so the thread stays responsive to
+            // cancellation requests and the SD card gets efficient bursts.
+            const size_t kChunk = 4 * 1024 * 1024;
+            const Byte*  src    = outBuffer + offset;
+            size_t       left   = outSizeProcessed;
+            bool         wErr   = false;
+            while (left > 0) {
+                size_t n = left < kChunk ? left : kChunk;
+                if (fwrite(src, 1, n, outFile) != n) { wErr = true; break; }
+                src  += n;
+                left -= n;
+            }
+            if (wErr) {
+                fclose(outFile);
+                success = false;
+                break;
+            }
         }
         fclose(outFile);
     }
