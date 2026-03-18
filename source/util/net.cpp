@@ -1,6 +1,5 @@
 #include "net.hpp"
 
-#include <switch.h>
 #include <curl/curl.h>
 #include <cstdio>
 #include <cstring>
@@ -54,10 +53,8 @@ static int curlProgressCb(void* clientp,
 
 bool init()
 {
-    Result rc = socketInitializeDefault();
-    if (R_FAILED(rc))
-        return false;
-
+    // Socket services are already initialized by borealis (switch_wrapper.c)
+    // via userAppInit(). We only need to initialize libcurl.
     curl_global_init(CURL_GLOBAL_DEFAULT);
     return true;
 }
@@ -65,7 +62,6 @@ bool init()
 void exit()
 {
     curl_global_cleanup();
-    socketExit();
 }
 
 std::string httpGet(const std::string& url)
