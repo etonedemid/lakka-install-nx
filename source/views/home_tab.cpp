@@ -52,13 +52,6 @@ HomeTab::HomeTab()
         this->checkForUpdate();
     });
 
-    // Install latest stable
-    m_itemInstallLatest = new brls::ListItem("Install Latest Stable",
-        "Download and install the latest stable Lakka build");
-    m_itemInstallLatest->getClickEvent()->subscribe([this](brls::View* view) {
-        this->installLatest();
-    });
-
     // Status item (used for messages)
     m_itemStatus = new brls::ListItem("Status");
     m_itemStatus->setValue("Ready");
@@ -69,7 +62,6 @@ HomeTab::HomeTab()
     this->addView(new brls::ListItemGroupSpacing(true));
     this->addView(new brls::Header("Quick Actions"));
     this->addView(m_itemCheckUpdate);
-    this->addView(m_itemInstallLatest);
     this->addView(new brls::ListItemGroupSpacing(true));
 
     // Reboot into Lakka — only useful if something is installed
@@ -198,92 +190,6 @@ void HomeTab::checkForUpdate()
     m_pollTask->start();
 }
 
-void HomeTab::installLatest()
-{
-    // If we already fetched the latest, go straight to install
-    if (!m_latestUrl.empty())
-    {
-        lakka::Version ver;
-        ver.version  = m_latestVersionStr;
-        ver.filename = m_latestFilename;
-        ver.url      = m_latestUrl;
-        ver.isDev    = m_latestIsDev;
-
-        InstallPage::pushInstallView(ver);
-        return;
-    }
-
-    // Otherwise fetch first, then install
-    if (m_fetching.load())
-    {
-        m_itemStatus->setValue("Already fetching...");
-        return;
-    }
-
-    m_itemStatus->setValue("Fetching latest...");
-    m_fetching.store(true);
-    m_fetchDone.store(false);
-    m_fetchError.store(false);
-
-    if (m_fetchThread.joinable())
-        m_fetchThread.detach();
-
-    m_fetchThread = std::thread([this]() {
-        try
-        {
-            auto versions = lakka::fetchStableVersions();
-            if (versions.empty())
-            {
-                m_fetchError.store(true);
-            }
-            else
-            {
-                m_fetchedVersions = versions;
-                auto latest = lakka::getLatest(versions);
-                m_latestVersionStr = latest.version;
-                m_latestFilename   = latest.filename;
-                m_latestUrl        = latest.url;
-                m_latestIsDev      = latest.isDev;
-            }
-        }
-        catch (...)
-        {
-            m_fetchError.store(true);
-        }
-        m_fetching.store(false);
-        m_fetchDone.store(true);
-    });
-
-    if (m_pollTask)
-    {
-        m_pollTask->stop();
-        m_pollTask = nullptr;
-    }
-
-    m_pollTask = new HomeTabPollTask([this]() {
-        if (!m_fetchDone.load())
-            return;
-
-        // Pause from within callback (cannot stop/delete self)
-        if (m_pollTask)
-            m_pollTask->pause();
-
-        if (m_fetchError.load())
-        {
-            m_itemStatus->setValue("Error fetching versions.");
-            return;
-        }
-
-        lakka::Version ver;
-        ver.version  = m_latestVersionStr;
-        ver.filename = m_latestFilename;
-        ver.url      = m_latestUrl;
-        ver.isDev    = m_latestIsDev;
-
-        InstallPage::pushInstallView(ver);
-    });
-    m_pollTask->start();
-}
 void HomeTab::confirmUninstall()
 {
     std::string ver = g_config.getInstalledVersion();

@@ -17,13 +17,11 @@ class HomeTab : public brls::List
 
   private:
     void checkForUpdate();
-    void installLatest();
     void confirmUninstall();
     void doUninstall();
 
     brls::ListItem* m_itemInstalledVersion = nullptr;
     brls::ListItem* m_itemCheckUpdate      = nullptr;
-    brls::ListItem* m_itemInstallLatest    = nullptr;
     brls::ListItem* m_itemStatus           = nullptr;
     brls::ListItem* m_itemReboot           = nullptr;
     brls::ListItem* m_itemUninstall        = nullptr;
