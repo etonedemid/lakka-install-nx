@@ -1,6 +1,7 @@
 #include "lakka_api.hpp"
 #include "net.hpp"
 
+#include <borealis.hpp>
 #include <algorithm>
 #include <cstring>
 
@@ -124,11 +125,16 @@ static std::vector<Version> parseDirectoryListing(const std::string& html,
 
 std::vector<Version> fetchVersionList(const std::string& baseUrl, bool isDev)
 {
+    brls::Logger::debug("lakka::fetchVersionList requesting: {}", baseUrl);
     std::string html = net::httpGet(baseUrl);
-    if (html.empty())
+    if (html.empty()) {
+        brls::Logger::error("lakka::fetchVersionList empty response from: {}", baseUrl);
         return {};
+    }
 
+    brls::Logger::debug("lakka::fetchVersionList got {} bytes, parsing...", html.size());
     auto versions = parseDirectoryListing(html, baseUrl, isDev);
+    brls::Logger::debug("lakka::fetchVersionList parsed {} versions", versions.size());
 
     // Sort by version string descending (newest first).
     // A simple reverse-lexicographic sort works for dotted numeric versions

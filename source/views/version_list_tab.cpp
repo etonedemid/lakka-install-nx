@@ -1,6 +1,8 @@
 #include "version_list_tab.hpp"
 #include "install_page.hpp"
 
+#include <borealis.hpp>
+
 // ── Poll task helper ─────────────────────────────────────────────────
 class VersionListPollTask : public brls::RepeatingTask
 {
@@ -41,6 +43,8 @@ VersionListTab::~VersionListTab()
 
 void VersionListTab::willAppear(bool resetState)
 {
+    brls::Logger::debug("VersionListTab[{}]::willAppear loaded={} fetching={}",
+        m_channel, m_loaded, m_fetching.load());
     brls::List::willAppear(resetState);
 
     if (!m_loaded && !m_fetching.load())
@@ -49,6 +53,7 @@ void VersionListTab::willAppear(bool resetState)
 
 void VersionListTab::fetchVersions()
 {
+    brls::Logger::debug("VersionListTab[{}]::fetchVersions starting thread", m_channel);
     m_fetching.store(true);
     m_fetchDone.store(false);
     m_fetchError.store(false);
@@ -61,6 +66,7 @@ void VersionListTab::fetchVersions()
         m_fetchThread.detach();
 
     m_fetchThread = std::thread([this]() {
+        brls::Logger::debug("VersionListTab[{}] fetch thread entered", m_channel);
         try
         {
             bool isDev = (m_channel == "nightly" || m_channel == "dev");
@@ -68,6 +74,9 @@ void VersionListTab::fetchVersions()
                 m_versions = lakka::fetchNightlyVersions();
             else
                 m_versions = lakka::fetchStableVersions();
+
+            brls::Logger::debug("VersionListTab[{}] fetch thread got {} versions",
+                m_channel, m_versions.size());
 
             if (m_versions.empty())
             {
@@ -77,14 +86,18 @@ void VersionListTab::fetchVersions()
         }
         catch (const std::exception& e)
         {
+            brls::Logger::error("VersionListTab[{}] fetch thread exception: {}", m_channel, e.what());
             m_errorMsg = std::string("Error: ") + e.what();
             m_fetchError.store(true);
         }
         catch (...)
         {
+            brls::Logger::error("VersionListTab[{}] fetch thread unknown exception", m_channel);
             m_errorMsg = "Unknown error fetching versions.";
             m_fetchError.store(true);
         }
+        brls::Logger::debug("VersionListTab[{}] fetch thread done, error={}",
+            m_channel, m_fetchError.load());
         m_fetching.store(false);
         m_fetchDone.store(true);
     });
@@ -100,6 +113,9 @@ void VersionListTab::fetchVersions()
         if (!m_fetchDone.load())
             return;
 
+        brls::Logger::debug("VersionListTab[{}] poll fired, error={}",
+            m_channel, m_fetchError.load());
+
         // Pause from within callback (cannot stop/delete self)
         if (m_pollTask)
             m_pollTask->pause();
@@ -114,10 +130,12 @@ void VersionListTab::fetchVersions()
         populateList();
     });
     m_pollTask->start();
+    brls::Logger::debug("VersionListTab[{}]::fetchVersions poll task started", m_channel);
 }
 
 void VersionListTab::populateList()
 {
+    brls::Logger::debug("VersionListTab[{}]::populateList {} versions", m_channel, m_versions.size());
     m_loaded = true;
 
     // Remove loading item.  After clear() the pointer is dangling — null it so

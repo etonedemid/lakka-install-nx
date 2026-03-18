@@ -2,6 +2,8 @@
 #include "../util/config.hpp"
 #include "install_page.hpp"
 
+#include <borealis.hpp>
+
 extern config::Config g_config;
 
 // ── Poll task helper ─────────────────────────────────────────────────
@@ -84,6 +86,7 @@ void HomeTab::checkForUpdate()
     if (m_fetching.load())
         return;
 
+    brls::Logger::debug("HomeTab::checkForUpdate starting thread");
     m_fetching.store(true);
     m_fetchDone.store(false);
     m_fetchError.store(false);
@@ -92,9 +95,11 @@ void HomeTab::checkForUpdate()
         m_fetchThread.detach();
 
     m_fetchThread = std::thread([this]() {
+        brls::Logger::debug("HomeTab fetch thread entered");
         try
         {
             auto versions = lakka::fetchStableVersions();
+            brls::Logger::debug("HomeTab fetch thread got {} versions", versions.size());
             if (versions.empty())
             {
                 m_fetchError.store(true);
@@ -111,8 +116,10 @@ void HomeTab::checkForUpdate()
         }
         catch (...)
         {
+            brls::Logger::error("HomeTab fetch thread unknown exception");
             m_fetchError.store(true);
         }
+        brls::Logger::debug("HomeTab fetch thread done, error={}", m_fetchError.load());
         m_fetching.store(false);
         m_fetchDone.store(true);
     });

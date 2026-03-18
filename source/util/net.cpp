@@ -1,5 +1,6 @@
 #include "net.hpp"
 
+#include <borealis.hpp>
 #include <curl/curl.h>
 #include <cstdio>
 #include <cstring>
@@ -74,11 +75,15 @@ std::string httpGet(const std::string& url)
 {
     std::string response;
 
+    brls::Logger::debug("net::httpGet waiting for mutex: {}", url);
     std::lock_guard<std::mutex> lock(g_curlMutex);
+    brls::Logger::debug("net::httpGet acquired mutex, starting request: {}", url);
 
     CURL* curl = curl_easy_init();
-    if (!curl)
+    if (!curl) {
+        brls::Logger::error("net::httpGet curl_easy_init failed");
         return response;
+    }
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LakkaInstallerNX/1.0");
@@ -93,10 +98,14 @@ std::string httpGet(const std::string& url)
 
     CURLcode res = curl_easy_perform(curl);
     if (res != CURLE_OK) {
+        brls::Logger::error("net::httpGet curl error {}: {}", (int)res, curl_easy_strerror(res));
         response.clear();
+    } else {
+        brls::Logger::debug("net::httpGet success, {} bytes received", response.size());
     }
 
     curl_easy_cleanup(curl);
+    brls::Logger::debug("net::httpGet released mutex: {}", url);
     return response;
 }
 
