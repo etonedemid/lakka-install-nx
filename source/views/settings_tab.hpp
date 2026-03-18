@@ -10,6 +10,5 @@ class SettingsTab : public brls::List
     SettingsTab();
 
   private:
-    brls::ToggleListItem* m_toggleDev       = nullptr;
     brls::ToggleListItem* m_toggleAutoUpdate = nullptr;
 };

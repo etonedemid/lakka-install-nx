@@ -72,9 +72,8 @@ HomeTab::~HomeTab()
 {
     if (m_pollTask)
     {
-        m_pollTask->pause();
-        // RepeatingTask::stop() deletes itself, but we track it manually
-        // to avoid double-delete during teardown, just pause it.
+        m_pollTask->stop();   // marks for deletion by TaskManager
+        m_pollTask = nullptr;
     }
     if (m_fetchThread.joinable())
         m_fetchThread.detach();
@@ -118,14 +117,18 @@ void HomeTab::checkForUpdate()
         m_fetchDone.store(true);
     });
 
-    // Start poll timer
+    // Start poll timer — stop any previous task first
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
 
     m_pollTask = new HomeTabPollTask([this]() {
         if (!m_fetchDone.load())
             return;
 
+        // Pause from within callback (cannot stop/delete self)
         if (m_pollTask)
             m_pollTask->pause();
 
@@ -214,12 +217,16 @@ void HomeTab::installLatest()
     });
 
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
 
     m_pollTask = new HomeTabPollTask([this]() {
         if (!m_fetchDone.load())
             return;
 
+        // Pause from within callback (cannot stop/delete self)
         if (m_pollTask)
             m_pollTask->pause();
 

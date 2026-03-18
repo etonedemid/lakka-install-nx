@@ -6,17 +6,6 @@ SettingsTab::SettingsTab()
 {
     this->addView(new brls::Header("Preferences"));
 
-    // Show nightly / dev builds toggle
-    m_toggleDev = new brls::ToggleListItem(
-        "Show Nightly Builds",
-        g_config.getShowDevVersions(),
-        "When enabled, the Nightly tab will be visible");
-    m_toggleDev->getClickEvent()->subscribe([this](brls::View* view) {
-        bool val = m_toggleDev->getToggleState();
-        g_config.setShowDevVersions(val);
-        g_config.save();
-    });
-
     // Auto-check updates toggle
     m_toggleAutoUpdate = new brls::ToggleListItem(
         "Auto-Check Updates on Launch",
@@ -28,7 +17,6 @@ SettingsTab::SettingsTab()
         g_config.save();
     });
 
-    this->addView(m_toggleDev);
     this->addView(m_toggleAutoUpdate);
 
     this->addView(new brls::ListItemGroupSpacing(true));

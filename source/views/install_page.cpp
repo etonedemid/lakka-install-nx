@@ -86,7 +86,10 @@ InstallPage::InstallPage(brls::StagedAppletFrame* frame,
 InstallPage::~InstallPage()
 {
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
 
     m_downloadTask.cancel();
     m_extractTask.cancel();
@@ -185,9 +188,12 @@ void InstallPage::startDownload()
 
     m_downloadTask.start(m_version.url, m_downloadPath);
 
-    // Start poll timer
+    // Start poll timer — stop any previous task first
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
 
     m_pollTask = new InstallPollTask([this]() {
         switch (m_state)

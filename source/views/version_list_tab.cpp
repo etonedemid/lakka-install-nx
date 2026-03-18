@@ -31,7 +31,10 @@ VersionListTab::VersionListTab(const std::string& channel)
 VersionListTab::~VersionListTab()
 {
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
     if (m_fetchThread.joinable())
         m_fetchThread.detach();
 }
@@ -86,14 +89,18 @@ void VersionListTab::fetchVersions()
         m_fetchDone.store(true);
     });
 
-    // Start polling
+    // Start polling — stop any previous task first
     if (m_pollTask)
-        m_pollTask->pause();
+    {
+        m_pollTask->stop();
+        m_pollTask = nullptr;
+    }
 
     m_pollTask = new VersionListPollTask([this]() {
         if (!m_fetchDone.load())
             return;
 
+        // Pause from within callback (cannot stop/delete self)
         if (m_pollTask)
             m_pollTask->pause();
 

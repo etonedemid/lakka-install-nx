@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <regex>
 
 namespace lakka {
 
@@ -14,8 +13,51 @@ namespace lakka {
 //
 //   <a href="Lakka-Switch.aarch64-6.1.7z">…</a>   2024-12-01 10:00  215M
 //
-// We extract the filename with a simple regex scan and optionally pick up the
-// date and size that follow the closing </a> tag.
+// We extract the filename using simple string searches (no std::regex — it is
+// far too heavy on the Switch ARM and can easily crash with a stack overflow).
+
+// Helpers for lightweight date/size extraction from text after the </a> tag.
+static bool isDigit(char c) { return c >= '0' && c <= '9'; }
+
+// Try to parse "YYYY-MM-DD HH:MM   SIZE" from |tail|.
+static void parseMetadata(const std::string& tail, std::string& outDate,
+                          std::string& outSize)
+{
+    // Look for a date like "2024-12-01"
+    for (size_t i = 0; i + 9 < tail.size(); ++i) {
+        if (isDigit(tail[i])   && isDigit(tail[i+1]) &&
+            isDigit(tail[i+2]) && isDigit(tail[i+3]) &&
+            tail[i+4] == '-' &&
+            isDigit(tail[i+5]) && isDigit(tail[i+6]) &&
+            tail[i+7] == '-' &&
+            isDigit(tail[i+8]) && isDigit(tail[i+9]))
+        {
+            outDate = tail.substr(i, 10);
+
+            // Skip past "YYYY-MM-DD HH:MM" then whitespace to get size
+            size_t j = i + 10;
+            // skip spaces
+            while (j < tail.size() && (tail[j] == ' ' || tail[j] == '\t')) ++j;
+            // skip HH:MM
+            if (j + 4 < tail.size() && isDigit(tail[j]) && isDigit(tail[j+1])
+                && tail[j+2] == ':' && isDigit(tail[j+3]) && isDigit(tail[j+4]))
+            {
+                j += 5;
+            }
+            // skip spaces
+            while (j < tail.size() && (tail[j] == ' ' || tail[j] == '\t')) ++j;
+            // read size token
+            size_t sizeStart = j;
+            while (j < tail.size() && tail[j] != ' ' && tail[j] != '\t' &&
+                   tail[j] != '<' && tail[j] != '\n' && tail[j] != '\r')
+                ++j;
+            if (j > sizeStart)
+                outSize = tail.substr(sizeStart, j - sizeStart);
+
+            return;
+        }
+    }
+}
 
 static std::vector<Version> parseDirectoryListing(const std::string& html,
                                                    const std::string& baseUrl,
@@ -23,39 +65,56 @@ static std::vector<Version> parseDirectoryListing(const std::string& html,
 {
     std::vector<Version> versions;
 
-    // Match: href="(Lakka-Switch.aarch64-SOMETHING.7z)"
-    // Capture group 1 = full filename
-    std::regex linkRe(
-        R"RE(href="(Lakka-Switch\.aarch64-([^"]+)\.7z)")RE",
-        std::regex::icase);
+    const std::string needle = "href=\"Lakka-Switch.aarch64-";
+    const std::string suffix = ".7z\"";
 
-    // Iterate over all matches
-    auto begin = std::sregex_iterator(html.begin(), html.end(), linkRe);
-    auto end   = std::sregex_iterator();
+    size_t searchPos = 0;
+    while (searchPos < html.size()) {
+        // Case-insensitive search is not needed — the server uses consistent
+        // casing.  A plain find is sufficient and extremely fast.
+        size_t hrefPos = html.find(needle, searchPos);
+        if (hrefPos == std::string::npos)
+            break;
 
-    for (auto it = begin; it != end; ++it) {
+        // The filename starts right after href="
+        size_t filenameStart = hrefPos + 6; // skip 'href="'
+        size_t filenameEnd = html.find('"', filenameStart);
+        if (filenameEnd == std::string::npos) {
+            searchPos = hrefPos + needle.size();
+            continue;
+        }
+
+        std::string filename = html.substr(filenameStart, filenameEnd - filenameStart);
+
+        // Must end with .7z
+        if (filename.size() < 4 ||
+            filename.compare(filename.size() - 3, 3, ".7z") != 0)
+        {
+            searchPos = filenameEnd;
+            continue;
+        }
+
+        // Extract version: between "Lakka-Switch.aarch64-" and ".7z"
+        const std::string prefix = "Lakka-Switch.aarch64-";
+        std::string ver = filename.substr(prefix.size(),
+                                          filename.size() - prefix.size() - 3);
+
         Version v;
-        v.filename = (*it)[1].str();              // full filename with .7z
-        v.version  = (*it)[2].str();              // version part (e.g. "6.1")
+        v.filename = filename;
+        v.version  = ver;
         v.url      = buildDownloadUrl(baseUrl, v.filename);
         v.isDev    = isDev;
 
-        // Try to extract date and size from the text after the link.
-        // Pattern: </a>  YYYY-MM-DD HH:MM   SIZE
-        size_t pos = static_cast<size_t>(it->position() + it->length());
-        if (pos < html.size()) {
-            // Look for a date pattern nearby
-            std::string tail = html.substr(pos, 80);
-
-            std::regex metaRe(R"((\d{4}-\d{2}-\d{2})\s+\d{2}:\d{2}\s+(\S+))");
-            std::smatch metaMatch;
-            if (std::regex_search(tail, metaMatch, metaRe)) {
-                v.date = metaMatch[1].str();
-                v.size = metaMatch[2].str();
-            }
+        // Try to extract date and size from the text after the link
+        if (filenameEnd + 1 < html.size()) {
+            size_t tailStart = filenameEnd + 1;
+            size_t tailLen   = std::min<size_t>(120, html.size() - tailStart);
+            std::string tail = html.substr(tailStart, tailLen);
+            parseMetadata(tail, v.date, v.size);
         }
 
         versions.push_back(std::move(v));
+        searchPos = filenameEnd;
     }
 
     return versions;
