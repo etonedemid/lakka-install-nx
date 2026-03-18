@@ -3,6 +3,12 @@
 #include <curl/curl.h>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
+
+// Global mutex: mbedtls (the Switch's TLS backend) is not safe to use from
+// multiple threads simultaneously.  Serialising all curl operations prevents
+// random crashes when two tabs fetch version lists at the same time.
+static std::mutex g_curlMutex;
 
 namespace net {
 
@@ -68,6 +74,8 @@ std::string httpGet(const std::string& url)
 {
     std::string response;
 
+    std::lock_guard<std::mutex> lock(g_curlMutex);
+
     CURL* curl = curl_easy_init();
     if (!curl)
         return response;
@@ -75,7 +83,9 @@ std::string httpGet(const std::string& url)
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LakkaInstallerNX/1.0");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stringWriteCb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -109,7 +119,9 @@ bool downloadFile(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LakkaInstallerNX/1.0");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fileWriteCb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);
@@ -210,7 +222,9 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "LakkaInstallerNX/1.0");
     curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 5L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 0L);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, fileWriteCb);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &ctx);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, curlProgressCb);

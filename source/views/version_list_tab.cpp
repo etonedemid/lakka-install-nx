@@ -120,7 +120,9 @@ void VersionListTab::populateList()
 {
     m_loaded = true;
 
-    // Remove loading item
+    // Remove loading item.  After clear() the pointer is dangling — null it so
+    // nothing can accidentally call methods on the freed object.
+    m_loadingItem = nullptr;
     this->clear();
 
     this->addView(new brls::Header(
