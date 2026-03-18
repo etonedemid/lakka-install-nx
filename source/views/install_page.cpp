@@ -12,7 +12,7 @@ class InstallPollTask : public brls::RepeatingTask
 {
   public:
     InstallPollTask(std::function<void()> cb)
-        : brls::RepeatingTask(100000) // 100 ms
+        : brls::RepeatingTask(100) // 100 ms
         , m_cb(std::move(cb))
     {}
 
