@@ -152,7 +152,7 @@ bool downloadFile(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 512L * 1024L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockoptCb);
     curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)(50L * 1024L * 1024L));
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
@@ -224,6 +224,8 @@ std::string DownloadTask::getErrorMessage() const
 
 void DownloadTask::run(const std::string& url, const std::string& outputPath)
 {
+    brls::Logger::debug("DownloadTask::run started url={}", url);
+
     FILE* fp = fopen(outputPath.c_str(), "wb");
     if (!fp) {
         std::lock_guard<std::mutex> lk(m_mutex);
@@ -262,7 +264,7 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, 512L * 1024L);
     curl_easy_setopt(curl, CURLOPT_TCP_NODELAY, 1L);
-    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockoptCb);
     curl_easy_setopt(curl, CURLOPT_MAX_RECV_SPEED_LARGE, (curl_off_t)(50L * 1024L * 1024L));
     curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 15L);
@@ -270,6 +272,8 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
 
     CURLcode res = curl_easy_perform(curl);
+    brls::Logger::debug("DownloadTask::run curl_easy_perform returned {} ({})",
+        (int)res, curl_easy_strerror(res));
     curl_easy_cleanup(curl);
     fclose(fp);
 

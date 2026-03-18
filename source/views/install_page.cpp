@@ -153,7 +153,9 @@ brls::View* InstallPage::getDefaultFocus()
 {
     if (!m_doneButton->isHidden())
         return m_doneButton;
-    return nullptr;
+    // Return 'this' rather than nullptr; borealis crashes if giveFocus() is
+    // called with nullptr (hint traversal walks currentFocus → SIGSEGV).
+    return this;
 }
 
 void InstallPage::willAppear(bool resetState)
