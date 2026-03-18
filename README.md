@@ -19,9 +19,10 @@ A Nintendo Switch homebrew application that downloads and installs
 
 ## Screenshots
 
-*(the app uses the standard Borealis Switch UI – tabs on the left, lists on the
-right, dialogs for confirmation, and a full-screen progress view during
-installation)*
+![2026031820480300-CB7BAB704ABB44157835D81424700503](https://github.com/user-attachments/assets/6dbdf724-e560-4468-8ed4-d02638c07734)
+![2026031820481000-CB7BAB704ABB44157835D81424700503](https://github.com/user-attachments/assets/5ef0813f-b526-4028-bb74-d7a737af2bcb)
+![2026031820481300-CB7BAB704ABB44157835D81424700503](https://github.com/user-attachments/assets/2e800870-d313-4002-9302-dced4c9b5d1f)
+
 
 ## Building
 
