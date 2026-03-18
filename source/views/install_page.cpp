@@ -1,9 +1,11 @@
 #include "install_page.hpp"
 #include "../util/config.hpp"
 
+#include <borealis.hpp>
 #include <cstdio>
 #include <sstream>
 #include <iomanip>
+#include <sys/stat.h>
 
 extern config::Config g_config;
 
@@ -156,6 +158,20 @@ brls::View* InstallPage::getDefaultFocus()
 
 void InstallPage::willAppear(bool resetState)
 {
+    brls::Logger::debug("InstallPage::willAppear resetState={} downloadStarted={}",
+        resetState, m_downloadStarted);
+
+    // AppletFrame::setContentView calls willAppear() before the view has been
+    // laid out (no bounds).  Application::pushView then calls willAppear(true)
+    // a second time once the view is properly set up.  Only run the real setup
+    // on the second call to avoid spawning duplicate download threads and
+    // calling m_progressDisplay->willAppear twice (which can crash the spinner).
+    if (!m_downloadStarted) {
+        m_downloadStarted = true;  // first call: remember we were here
+        brls::Logger::debug("InstallPage::willAppear: first call (pre-layout), skipping startDownload");
+        return;
+    }
+
     m_progressDisplay->willAppear(resetState);
     startDownload();
 }
@@ -170,6 +186,13 @@ void InstallPage::willDisappear(bool resetState)
 // ── static helper ────────────────────────────────────────────────────
 void InstallPage::pushInstallView(const lakka::Version& version)
 {
+    brls::Logger::debug("InstallPage::pushInstallView ver={} url={}",
+        version.version, version.url);
+
+    if (version.url.empty()) {
+        brls::Logger::error("InstallPage::pushInstallView: empty URL, aborting");
+        return;
+    }
     brls::StagedAppletFrame* staged = new brls::StagedAppletFrame();
     staged->setTitle("Installing Lakka " + version.version);
 
@@ -181,6 +204,19 @@ void InstallPage::pushInstallView(const lakka::Version& version)
 // ── download / extract logic ─────────────────────────────────────────
 void InstallPage::startDownload()
 {
+    brls::Logger::debug("InstallPage::startDownload url={}", m_version.url);
+
+    // Create the download directory if it doesn't exist (all parent dirs too).
+    // mkdir() only creates a single level so we do it manually.
+    std::string dirPath = config::DOWNLOAD_DIR;
+    std::string cur;
+    for (size_t i = 0; i < dirPath.size(); ++i) {
+        cur += dirPath[i];
+        if (dirPath[i] == '/' || i == dirPath.size() - 1)
+            mkdir(cur.c_str(), 0755);
+    }
+    brls::Logger::debug("InstallPage::startDownload dir ensured: {}", config::DOWNLOAD_DIR);
+
     m_state = State::DOWNLOADING;
     m_titleLabel->setText("Downloading " + m_version.version + "...");
     m_statusLabel->setText("0%");
@@ -212,10 +248,13 @@ void InstallPage::startDownload()
 
             if (m_downloadTask.isComplete() && !m_downloadTask.hasError())
             {
+                brls::Logger::debug("InstallPage: download complete, starting extract");
                 startExtract();
             }
             else if (m_downloadTask.hasError())
             {
+                brls::Logger::error("InstallPage: download error: {}",
+                    m_downloadTask.getErrorMessage());
                 m_state = State::ERROR;
                 m_titleLabel->setText("Download Failed");
                 m_statusLabel->setText(m_downloadTask.getErrorMessage());
@@ -253,6 +292,7 @@ void InstallPage::startDownload()
 
             if (m_extractTask.isComplete() && !m_extractTask.hasError())
             {
+                brls::Logger::debug("InstallPage: extract complete");
                 m_state = State::DONE;
                 m_progressDisplay->setProgress(100, 100);
                 m_titleLabel->setText("Installation Complete!");
@@ -271,6 +311,8 @@ void InstallPage::startDownload()
             }
             else if (m_extractTask.hasError())
             {
+                brls::Logger::error("InstallPage: extract error: {}",
+                    m_extractTask.getErrorMessage());
                 m_state = State::ERROR;
                 m_titleLabel->setText("Extraction Failed");
                 m_statusLabel->setText(m_extractTask.getErrorMessage());

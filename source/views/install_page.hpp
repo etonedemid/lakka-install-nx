@@ -48,6 +48,8 @@ class InstallPage : public brls::View
     net::DownloadTask        m_downloadTask;
     extract::ExtractTask     m_extractTask;
 
+    bool                     m_downloadStarted{false}; // guard against double willAppear
+
     brls::ProgressDisplay*   m_progressDisplay = nullptr;
     brls::Label*             m_titleLabel      = nullptr;
     brls::Label*             m_statusLabel     = nullptr;
