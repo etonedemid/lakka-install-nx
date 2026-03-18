@@ -7,6 +7,8 @@
 #include <iomanip>
 #include <sys/stat.h>
 #include <vector>
+#include <algorithm>
+#include <cmath>
 
 extern config::Config g_config;
 
@@ -35,13 +37,20 @@ static std::string formatBytes(size_t bytes)
     const char* units[] = {"B", "KB", "MB", "GB"};
     int i = 0;
     double sz = static_cast<double>(bytes);
-    while (sz >= 1024.0 && i < 3)
-    {
-        sz /= 1024.0;
-        i++;
-    }
+    while (sz >= 1024.0 && i < 3) { sz /= 1024.0; i++; }
     std::ostringstream oss;
     oss << std::fixed << std::setprecision(1) << sz << " " << units[i];
+    return oss.str();
+}
+
+static std::string formatEta(int seconds)
+{
+    if (seconds < 0) return "";
+    int m = seconds / 60;
+    int s = seconds % 60;
+    std::ostringstream oss;
+    if (m > 0) oss << m << "m ";
+    oss << s << "s remaining";
     return oss.str();
 }
 
@@ -53,25 +62,26 @@ InstallPage::InstallPage(brls::StagedAppletFrame* frame,
 {
     m_downloadPath = std::string(config::DOWNLOAD_DIR) + "/" + m_version.filename;
 
-    // Title label
+    // Stage badge  e.g. "Step 1/2  ·  Downloading"
+    m_stageLabel = new brls::Label(brls::LabelStyle::DESCRIPTION,
+        "Step 1/2  \u00b7  Connecting...", false);
+    m_stageLabel->setHorizontalAlign(NVG_ALIGN_CENTER);
+    m_stageLabel->setParent(this);
+
+    // Main title label
     m_titleLabel = new brls::Label(brls::LabelStyle::MEDIUM,
-        "Downloading " + m_version.version + "...", false);
+        "Lakka " + m_version.version, false);
     m_titleLabel->setHorizontalAlign(NVG_ALIGN_CENTER);
     m_titleLabel->setParent(this);
 
-    // Progress display
-    m_progressDisplay = new brls::ProgressDisplay();
-    m_progressDisplay->setParent(this);
-    m_progressDisplay->setProgress(0, 100);
+    // Stats: percentage · size · speed
+    m_statsLabel = new brls::Label(brls::LabelStyle::SMALL,
+        "", false);
+    m_statsLabel->setHorizontalAlign(NVG_ALIGN_CENTER);
+    m_statsLabel->setParent(this);
 
-    // Status label (shows percentage and download size)
-    m_statusLabel = new brls::Label(brls::LabelStyle::REGULAR,
-        "0%", false);
-    m_statusLabel->setHorizontalAlign(NVG_ALIGN_CENTER);
-    m_statusLabel->setParent(this);
-
-    // Detail label (shows current file during extraction)
-    m_detailLabel = new brls::Label(brls::LabelStyle::SMALL,
+    // Detail: current filename during extraction / ETA
+    m_detailLabel = new brls::Label(brls::LabelStyle::DESCRIPTION,
         "", false);
     m_detailLabel->setHorizontalAlign(NVG_ALIGN_CENTER);
     m_detailLabel->setParent(this);
@@ -97,9 +107,9 @@ InstallPage::~InstallPage()
     m_downloadTask.cancel();
     m_extractTask.cancel();
 
+    delete m_stageLabel;
     delete m_titleLabel;
-    delete m_progressDisplay;
-    delete m_statusLabel;
+    delete m_statsLabel;
     delete m_detailLabel;
     delete m_doneButton;
 }
@@ -108,9 +118,84 @@ void InstallPage::draw(NVGcontext* vg, int x, int y,
                        unsigned width, unsigned height,
                        brls::Style* style, brls::FrameContext* ctx)
 {
+    // ── advance indeterminate animation ──────────────────────────────
+    retro_time_t now = cpu_features_get_time_usec();
+    if (m_lastFrameTime != 0) {
+        float dt = static_cast<float>(now - m_lastFrameTime) / 1000000.0f;
+        m_animPhase += dt * 0.65f;  // ~1 sweep every 1.5 s
+        if (m_animPhase >= 1.0f) m_animPhase -= 1.0f;
+    }
+    m_lastFrameTime = now;
+
+    // ── labels ───────────────────────────────────────────────────────
+    m_stageLabel->frame(ctx);
     m_titleLabel->frame(ctx);
-    m_progressDisplay->frame(ctx);
-    m_statusLabel->frame(ctx);
+
+    // ── custom progress bar ──────────────────────────────────────────
+    const int   barMargin = 120;
+    const float barH      = 18.0f;
+    const float barR      = barH / 2.0f;
+    float barX = static_cast<float>(x + barMargin);
+    float barY = static_cast<float>(m_progressBarY);
+    float barW = static_cast<float>(width - barMargin * 2);
+
+    // Track (background)
+    nvgBeginPath(vg);
+    nvgRoundedRect(vg, barX, barY, barW, barH, barR);
+    nvgFillColor(vg, nvgRGBA(128, 128, 128, 55));
+    nvgFill(vg);
+
+    bool deterministic = (m_dlTotal > 0);
+
+    if (deterministic && m_progressPct > 0.0f) {
+        // Deterministic fill with gradient
+        float fillW = std::max(barR * 2, barW * (m_progressPct / 100.0f));
+        NVGpaint paint = nvgLinearGradient(vg,
+            barX, barY, barX + fillW, barY,
+            a(ctx->theme->highlightColor1),
+            a(ctx->theme->highlightColor2));
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, barX, barY, fillW, barH, barR);
+        nvgFillPaint(vg, paint);
+        nvgFill(vg);
+    } else if (!deterministic &&
+               (m_state == State::CONNECTING || m_state == State::DOWNLOADING)) {
+        // Indeterminate: sweeping shimmer ~35% wide
+        float sweepFrac = 0.38f;
+        float sweepW    = barW * sweepFrac;
+        float offset    = (barW + sweepW) * m_animPhase - sweepW;
+        float rectX1    = std::max(barX, barX + offset);
+        float rectX2    = std::min(barX + barW, barX + offset + sweepW);
+        if (rectX2 > rectX1) {
+            NVGpaint paint = nvgLinearGradient(vg,
+                barX + offset, barY,
+                barX + offset + sweepW, barY,
+                nvgRGBAf(ctx->theme->highlightColor1.r,
+                         ctx->theme->highlightColor1.g,
+                         ctx->theme->highlightColor1.b, 0.0f),
+                a(ctx->theme->highlightColor1));
+            nvgBeginPath(vg);
+            nvgRoundedRect(vg, rectX1, barY, rectX2 - rectX1, barH, barR);
+            nvgFillPaint(vg, paint);
+            nvgFill(vg);
+        }
+    } else if (m_state == State::DONE) {
+        // Full bar
+        NVGpaint paint = nvgLinearGradient(vg, barX, barY, barX + barW, barY,
+            a(ctx->theme->highlightColor1), a(ctx->theme->highlightColor2));
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, barX, barY, barW, barH, barR);
+        nvgFillPaint(vg, paint);
+        nvgFill(vg);
+    } else if (m_state == State::ERROR) {
+        nvgBeginPath(vg);
+        nvgRoundedRect(vg, barX, barY, barW, barH, barR);
+        nvgFillColor(vg, nvgRGBA(200, 60, 60, 180));
+        nvgFill(vg);
+    }
+
+    // ── remaining labels ─────────────────────────────────────────────
+    m_statsLabel->frame(ctx);
     m_detailLabel->frame(ctx);
     m_doneButton->frame(ctx);
 }
@@ -121,32 +206,37 @@ void InstallPage::layout(NVGcontext* vg, brls::Style* style, brls::FontStash* st
     unsigned py = this->y;
     unsigned pw = this->width;
     unsigned ph = this->height;
+    unsigned cx = px + pw / 2;
 
-    unsigned margin = 40;
-    unsigned centerX = px + pw / 2;
+    // Centre a block of ~250 px vertically
+    const int blockH    = 250;
+    int       blockTop  = static_cast<int>(py) + (static_cast<int>(ph) - blockH) / 2;
 
-    // Title at top center
-    m_titleLabel->setBoundaries(px + margin, py + ph / 4, pw - margin * 2, 40);
+    unsigned margin = 80;
+
+    // Stage badge (small, muted)
+    m_stageLabel->setBoundaries(px + margin, blockTop, pw - margin * 2, 24);
+    m_stageLabel->invalidate();
+
+    // Version title
+    m_titleLabel->setBoundaries(px + margin, blockTop + 32, pw - margin * 2, 44);
     m_titleLabel->invalidate();
 
-    // Progress display centered
-    unsigned pdW = 300;
-    unsigned pdH = 60;
-    m_progressDisplay->setBoundaries(centerX - pdW / 2, py + ph / 4 + 60, pdW, pdH);
-    m_progressDisplay->invalidate();
+    // Progress bar Y (drawn in draw(), store for reference)
+    m_progressBarY = blockTop + 96;
 
-    // Status below progress
-    m_statusLabel->setBoundaries(px + margin, py + ph / 4 + 140, pw - margin * 2, 30);
-    m_statusLabel->invalidate();
+    // Stats row (percent · size · speed)
+    m_statsLabel->setBoundaries(px + margin, blockTop + 128, pw - margin * 2, 26);
+    m_statsLabel->invalidate();
 
-    // Detail below status
-    m_detailLabel->setBoundaries(px + margin, py + ph / 4 + 180, pw - margin * 2, 30);
+    // Detail / ETA
+    m_detailLabel->setBoundaries(px + margin, blockTop + 162, pw - margin * 2, 26);
     m_detailLabel->invalidate();
 
-    // Done button centered below
-    unsigned btnW = 200;
-    unsigned btnH = 60;
-    m_doneButton->setBoundaries(centerX - btnW / 2, py + ph / 4 + 240, btnW, btnH);
+    // Done button
+    unsigned btnW = 220;
+    unsigned btnH = 50;
+    m_doneButton->setBoundaries(cx - btnW / 2, blockTop + 200, btnW, btnH);
     m_doneButton->invalidate();
 }
 
@@ -154,8 +244,6 @@ brls::View* InstallPage::getDefaultFocus()
 {
     if (!m_doneButton->isHidden())
         return m_doneButton;
-    // Return 'this' rather than nullptr; borealis crashes if giveFocus() is
-    // called with nullptr (hint traversal walks currentFocus → SIGSEGV).
     return this;
 }
 
@@ -164,28 +252,21 @@ void InstallPage::willAppear(bool resetState)
     brls::Logger::debug("InstallPage::willAppear resetState={} downloadStarted={}",
         resetState, m_downloadStarted);
 
-    // AppletFrame::setContentView calls willAppear() before the view has been
-    // laid out (no bounds).  Application::pushView then calls willAppear(true)
-    // a second time once the view is properly set up.  Only run the real setup
-    // on the second call to avoid spawning duplicate download threads and
-    // calling m_progressDisplay->willAppear twice (which can crash the spinner).
     if (!m_downloadStarted) {
-        m_downloadStarted = true;  // first call: remember we were here
+        m_downloadStarted = true;
         brls::Logger::debug("InstallPage::willAppear: first call (pre-layout), skipping startDownload");
         return;
     }
 
-    m_progressDisplay->willAppear(resetState);
-
-    // Override the global + → quit action so that accidentally pressing +
-    // while the download/extraction is running does not kill the app.
-    // When already done/failed the button just pops the view like normal.
+    // Override + → exit while a transfer is active
     this->registerAction("Back", brls::Key::PLUS, [this]() -> bool {
-        if (m_state == State::DOWNLOADING || m_state == State::EXTRACTING) {
+        if (m_state == State::CONNECTING ||
+            m_state == State::DOWNLOADING ||
+            m_state == State::EXTRACTING) {
             brls::Dialog* dlg = new brls::Dialog(
-                "A download is in progress.\nCancel and go back?");
-            dlg->addButton("Keep Downloading", [](brls::View*) {});
-            dlg->addButton("Cancel Download",  [](brls::View*) {
+                "A transfer is in progress.\nCancel and go back?");
+            dlg->addButton("Keep Going",      [](brls::View*) {});
+            dlg->addButton("Cancel & Back",   [](brls::View*) {
                 brls::Application::popView();
             });
             dlg->setCancelable(true);
@@ -201,7 +282,6 @@ void InstallPage::willAppear(bool resetState)
 
 void InstallPage::willDisappear(bool resetState)
 {
-    m_progressDisplay->willDisappear(resetState);
     if (m_pollTask)
         m_pollTask->pause();
 }
@@ -218,10 +298,42 @@ void InstallPage::pushInstallView(const lakka::Version& version)
     }
     brls::StagedAppletFrame* staged = new brls::StagedAppletFrame();
     staged->setTitle("Installing Lakka " + version.version);
-
     staged->addStage(new InstallPage(staged, version));
-
     brls::Application::pushView(staged);
+}
+
+// ── speed helper ─────────────────────────────────────────────────────
+void InstallPage::updateSpeed(size_t currentBytes)
+{
+    retro_time_t now = cpu_features_get_time_usec();
+    if (m_speedLastTime == 0) {
+        m_speedLastTime  = now;
+        m_speedLastBytes = currentBytes;
+        return;
+    }
+    retro_time_t elapsed = now - m_speedLastTime;
+    if (elapsed < 500000) // update at most every 500 ms
+        return;
+
+    size_t delta = currentBytes > m_speedLastBytes ?
+                   currentBytes - m_speedLastBytes : 0;
+    float newSpeed = static_cast<float>(delta) /
+                     (static_cast<float>(elapsed) / 1000000.0f) /
+                     (1024.0f * 1024.0f);
+
+    // Exponential moving average  (alpha = 0.35)
+    m_speedMBs = m_speedMBs * 0.65f + newSpeed * 0.35f;
+
+    if (m_dlTotal > 0 && m_speedMBs > 0.01f) {
+        size_t remaining = m_dlTotal > currentBytes ? m_dlTotal - currentBytes : 0;
+        m_etaSec = static_cast<int>(
+            static_cast<float>(remaining) / (m_speedMBs * 1024.0f * 1024.0f));
+    } else {
+        m_etaSec = -1;
+    }
+
+    m_speedLastTime  = now;
+    m_speedLastBytes = currentBytes;
 }
 
 // ── download / extract logic ─────────────────────────────────────────
@@ -229,8 +341,7 @@ void InstallPage::startDownload()
 {
     brls::Logger::debug("InstallPage::startDownload url={}", m_version.url);
 
-    // Create the download directory if it doesn't exist (all parent dirs too).
-    // mkdir() only creates a single level so we do it manually.
+    // Create the download directory if it doesn't exist
     std::string dirPath = config::DOWNLOAD_DIR;
     std::string cur;
     for (size_t i = 0; i < dirPath.size(); ++i) {
@@ -240,16 +351,20 @@ void InstallPage::startDownload()
     }
     brls::Logger::debug("InstallPage::startDownload dir ensured: {}", config::DOWNLOAD_DIR);
 
-    m_state = State::DOWNLOADING;
-    m_titleLabel->setText("Downloading " + m_version.version + "...");
-    m_statusLabel->setText("0%");
+    m_state = State::CONNECTING;
+    m_speedLastTime  = 0;
+    m_speedLastBytes = 0;
+    m_speedMBs       = 0.0f;
+    m_etaSec         = -1;
+
+    m_stageLabel->setText("Step 1/2  \u00b7  Downloading");
+    m_titleLabel->setText("Lakka " + m_version.version);
+    m_statsLabel->setText("Connecting...");
     m_detailLabel->setText(m_version.filename);
 
     m_downloadTask.start(m_version.url, m_downloadPath);
 
-    // Start poll timer — stop any previous task first
-    if (m_pollTask)
-    {
+    if (m_pollTask) {
         m_pollTask->stop();
         m_pollTask = nullptr;
     }
@@ -257,39 +372,62 @@ void InstallPage::startDownload()
     m_pollTask = new InstallPollTask([this]() {
         switch (m_state)
         {
+        case State::CONNECTING:
         case State::DOWNLOADING:
         {
-            float progress = m_downloadTask.getProgress();
-            int pct = static_cast<int>(progress * 100.0f);
-            m_progressDisplay->setProgress(pct, 100);
-            m_statusLabel->setText(std::to_string(pct) + "%");
-
-            size_t dl = m_downloadTask.getDownloaded();
+            size_t dl    = m_downloadTask.getDownloaded();
             size_t total = m_downloadTask.getTotal();
-            if (total > 0)
-                m_detailLabel->setText(formatBytes(dl) + " / " + formatBytes(total));
 
-            if (m_downloadTask.isComplete() && !m_downloadTask.hasError())
-            {
+            m_dlBytes = dl;
+            m_dlTotal = total;
+
+            if (total > 0) {
+                m_state = State::DOWNLOADING;
+                float progress = static_cast<float>(dl) / static_cast<float>(total);
+                m_progressPct  = progress * 100.0f;
+            }
+
+            updateSpeed(dl);
+
+            // Build stats line:  "72%    342.1 MB / 478.3 MB    7.3 MB/s"
+            std::ostringstream stats;
+            if (total > 0) {
+                int pct = static_cast<int>(m_progressPct);
+                stats << pct << "%";
+                stats << "    " << formatBytes(dl) << " / " << formatBytes(total);
+            } else {
+                stats << formatBytes(dl) << " received";
+            }
+            if (m_speedMBs > 0.05f) {
+                std::ostringstream sp;
+                sp << std::fixed << std::setprecision(1) << m_speedMBs;
+                stats << "    " << sp.str() << " MB/s";
+            }
+            m_statsLabel->setText(stats.str());
+
+            // Detail line: ETA while size is known, filename while connecting
+            if (total > 0 && m_etaSec >= 0)
+                m_detailLabel->setText(formatEta(m_etaSec));
+            else
+                m_detailLabel->setText(m_version.filename);
+
+            if (m_downloadTask.isComplete() && !m_downloadTask.hasError()) {
                 brls::Logger::debug("InstallPage: download complete, starting extract");
                 startExtract();
-            }
-            else if (m_downloadTask.hasError())
-            {
+            } else if (m_downloadTask.hasError()) {
                 brls::Logger::error("InstallPage: download error: {}",
                     m_downloadTask.getErrorMessage());
                 m_state = State::ERROR;
-                m_titleLabel->setText("Download Failed");
-                m_statusLabel->setText(m_downloadTask.getErrorMessage());
+                m_stageLabel->setText("Download Failed");
+                m_titleLabel->setText("Lakka " + m_version.version);
+                m_statsLabel->setText(m_downloadTask.getErrorMessage());
                 m_detailLabel->setText("");
                 m_doneButton->show([](){});
                 if (m_pollTask) m_pollTask->pause();
-            }
-            else if (m_downloadTask.isCancelled())
-            {
+            } else if (m_downloadTask.isCancelled()) {
                 m_state = State::ERROR;
-                m_titleLabel->setText("Download Cancelled");
-                m_statusLabel->setText("");
+                m_stageLabel->setText("Cancelled");
+                m_statsLabel->setText("");
                 m_detailLabel->setText("");
                 m_doneButton->show([](){});
                 if (m_pollTask) m_pollTask->pause();
@@ -300,38 +438,39 @@ void InstallPage::startDownload()
         case State::EXTRACTING:
         {
             float progress = m_extractTask.getProgress();
-            int pct = static_cast<int>(progress * 100.0f);
-            m_progressDisplay->setProgress(pct, 100);
-            m_statusLabel->setText(std::to_string(pct) + "%");
+            m_progressPct  = progress * 100.0f;
 
-            size_t cur = m_extractTask.getCurrent();
+            size_t cur   = m_extractTask.getCurrent();
             size_t total = m_extractTask.getTotal();
-            if (total > 0)
-                m_detailLabel->setText(
-                    std::to_string(cur) + "/" + std::to_string(total) +
-                    " — " + m_extractTask.getCurrentFile());
-            else
-                m_detailLabel->setText(m_extractTask.getCurrentFile());
 
-            if (m_extractTask.isComplete() && !m_extractTask.hasError())
-            {
+            std::ostringstream stats;
+            stats << static_cast<int>(m_progressPct) << "%";
+            if (total > 0)
+                stats << "    file " << cur << " / " << total;
+            m_statsLabel->setText(stats.str());
+
+            std::string fname = m_extractTask.getCurrentFile();
+            // Trim long paths to last component
+            auto slash = fname.rfind('/');
+            if (slash != std::string::npos) fname = fname.substr(slash + 1);
+            m_detailLabel->setText(fname);
+
+            if (m_extractTask.isComplete() && !m_extractTask.hasError()) {
                 brls::Logger::debug("InstallPage: extract complete");
                 m_state = State::DONE;
-                m_progressDisplay->setProgress(100, 100);
+                m_progressPct = 100.0f;
+                m_stageLabel->setText("Complete");
                 m_titleLabel->setText("Installation Complete!");
-                m_statusLabel->setText(m_version.version + " installed successfully");
+                m_statsLabel->setText(m_version.version + " installed successfully");
                 m_detailLabel->setText("");
                 m_doneButton->show([](){});
                 if (m_pollTask) m_pollTask->pause();
 
-                // Save config
                 g_config.setInstalledVersion(m_version.version);
                 g_config.setInstalledChannel(m_version.isDev ? "dev" : "stable");
                 g_config.save();
 
-                // Save manifest of extracted files for uninstall support.
-                // Paths from ExtractTask are archive-relative; prepend the
-                // install root so uninstall doesn't need to know it.
+                // Save manifest
                 auto relPaths = m_extractTask.getExtractedPaths();
                 if (!relPaths.empty()) {
                     std::vector<std::string> absPaths;
@@ -344,16 +483,13 @@ void InstallPage::startDownload()
                     g_config.saveManifest(absPaths);
                 }
 
-                // Remove downloaded archive
                 std::remove(m_downloadPath.c_str());
-            }
-            else if (m_extractTask.hasError())
-            {
+            } else if (m_extractTask.hasError()) {
                 brls::Logger::error("InstallPage: extract error: {}",
                     m_extractTask.getErrorMessage());
                 m_state = State::ERROR;
-                m_titleLabel->setText("Extraction Failed");
-                m_statusLabel->setText(m_extractTask.getErrorMessage());
+                m_stageLabel->setText("Extraction Failed");
+                m_statsLabel->setText(m_extractTask.getErrorMessage());
                 m_detailLabel->setText("");
                 m_doneButton->show([](){});
                 if (m_pollTask) m_pollTask->pause();
@@ -371,11 +507,12 @@ void InstallPage::startDownload()
 
 void InstallPage::startExtract()
 {
-    m_state = State::EXTRACTING;
-    m_titleLabel->setText("Extracting " + m_version.version + "...");
-    m_statusLabel->setText("0%");
+    m_state       = State::EXTRACTING;
+    m_progressPct = 0.0f;
+    m_stageLabel->setText("Step 2/2  \u00b7  Extracting");
+    m_titleLabel->setText("Lakka " + m_version.version);
+    m_statsLabel->setText("0%");
     m_detailLabel->setText("");
-    m_progressDisplay->setProgress(0, 100);
 
     std::string installPath = g_config.getInstallPath();
     if (installPath.empty())
@@ -383,3 +520,4 @@ void InstallPage::startExtract()
 
     m_extractTask.start(m_downloadPath, installPath);
 }
+
