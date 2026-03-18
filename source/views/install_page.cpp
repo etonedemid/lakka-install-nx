@@ -120,6 +120,8 @@ void InstallPage::draw(NVGcontext* vg, int x, int y,
 {
     // ── advance indeterminate animation ──────────────────────────────
     retro_time_t now = cpu_features_get_time_usec();
+    if (m_lastFrameTime == 0)
+        brls::Logger::debug("InstallPage::draw: first frame");
     if (m_lastFrameTime != 0) {
         float dt = static_cast<float>(now - m_lastFrameTime) / 1000000.0f;
         m_animPhase += dt * 0.65f;  // ~1 sweep every 1.5 s

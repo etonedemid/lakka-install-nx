@@ -42,7 +42,7 @@ static size_t fileWriteCb(void* contents, size_t size, size_t nmemb, void* userp
 // enough headroom to sustain ~50 MB/s on 802.11ac.
 static int sockoptCb(void* /*clientp*/, curl_socket_t curlfd, curlsocktype /*purpose*/)
 {
-    int rcvbuf = 8 * 1024 * 1024;
+    int rcvbuf = 4 * 1024 * 1024;
     setsockopt(curlfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
     return CURL_SOCKOPT_OK;
 }
@@ -129,7 +129,7 @@ bool downloadFile(const std::string& url,
     if (!fp)
         return false;
 
-    setvbuf(fp, nullptr, _IOFBF, 4 * 1024 * 1024);
+    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
 
     FileWriteCtx ctx{fp, nullptr, progressCb};
 
@@ -173,11 +173,30 @@ bool downloadFile(const std::string& url,
 
 // ── DownloadTask ───────────────────────────────────────────────────────────────
 
+namespace {
+struct DLThreadArgs {
+    DownloadTask* task;
+    std::string   url;
+    std::string   path;
+};
+} // namespace
+
+void* DownloadTask::threadEntry(void* arg)
+{
+    auto* a = static_cast<DLThreadArgs*>(arg);
+    a->task->run(a->url, a->path);
+    delete a;
+    return nullptr;
+}
+
 DownloadTask::~DownloadTask()
 {
     cancel();
-    if (m_thread.joinable())
-        m_thread.join();
+    if (m_pthreadAlive)
+    {
+        pthread_join(m_pthread, nullptr);
+        m_pthreadAlive = false;
+    }
 }
 
 void DownloadTask::start(const std::string& url, const std::string& outputPath)
@@ -197,10 +216,19 @@ void DownloadTask::start(const std::string& url, const std::string& outputPath)
         m_errorMessage.clear();
     }
 
-    if (m_thread.joinable())
-        m_thread.join();
+    if (m_pthreadAlive)
+    {
+        pthread_join(m_pthread, nullptr);
+        m_pthreadAlive = false;
+    }
 
-    m_thread = std::thread(&DownloadTask::run, this, url, outputPath);
+    auto* args = new DLThreadArgs{this, url, outputPath};
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 512 * 1024); // 512 KB: mbedtls TLS needs ~80 KB
+    pthread_create(&m_pthread, &attr, &DownloadTask::threadEntry, args);
+    pthread_attr_destroy(&attr);
+    m_pthreadAlive = true;
 }
 
 void DownloadTask::cancel()
@@ -236,7 +264,7 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
         return;
     }
 
-    setvbuf(fp, nullptr, _IOFBF, 4 * 1024 * 1024);
+    setvbuf(fp, nullptr, _IOFBF, 1024 * 1024);
 
     FileWriteCtx ctx{fp, this, nullptr};
 

@@ -3,7 +3,7 @@
 #include <string>
 #include <functional>
 #include <atomic>
-#include <thread>
+#include <pthread.h>
 #include <mutex>
 #include <vector>
 
@@ -55,8 +55,10 @@ public:
 
 private:
     void run(const std::string& url, const std::string& outputPath);
+    static void* threadEntry(void* arg);
 
-    std::thread        m_thread;
+    pthread_t          m_pthread{};
+    bool               m_pthreadAlive{false};
     std::atomic<bool>  m_running{false};
     std::atomic<bool>  m_complete{false};
     std::atomic<bool>  m_error{false};

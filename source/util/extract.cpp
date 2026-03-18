@@ -188,11 +188,30 @@ bool extract7z(const std::string& archivePath,
 
 // ── ExtractTask ────────────────────────────────────────────────────────────────
 
+namespace {
+struct EXThreadArgs {
+    ExtractTask* task;
+    std::string  archivePath;
+    std::string  destDir;
+};
+} // namespace
+
+void* ExtractTask::threadEntry(void* arg)
+{
+    auto* a = static_cast<EXThreadArgs*>(arg);
+    a->task->run(a->archivePath, a->destDir);
+    delete a;
+    return nullptr;
+}
+
 ExtractTask::~ExtractTask()
 {
     cancel();
-    if (m_thread.joinable())
-        m_thread.join();
+    if (m_pthreadAlive)
+    {
+        pthread_join(m_pthread, nullptr);
+        m_pthreadAlive = false;
+    }
 }
 
 void ExtractTask::start(const std::string& archivePath,
@@ -215,10 +234,19 @@ void ExtractTask::start(const std::string& archivePath,
         m_extractedPaths.clear();
     }
 
-    if (m_thread.joinable())
-        m_thread.join();
+    if (m_pthreadAlive)
+    {
+        pthread_join(m_pthread, nullptr);
+        m_pthreadAlive = false;
+    }
 
-    m_thread = std::thread(&ExtractTask::run, this, archivePath, destDir);
+    auto* args = new EXThreadArgs{this, archivePath, destDir};
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, 512 * 1024); // 512 KB: LZMA decompression needs headroom
+    pthread_create(&m_pthread, &attr, &ExtractTask::threadEntry, args);
+    pthread_attr_destroy(&attr);
+    m_pthreadAlive = true;
 }
 
 void ExtractTask::cancel()
