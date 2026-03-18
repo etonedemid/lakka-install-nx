@@ -252,7 +252,6 @@ std::string DownloadTask::getErrorMessage() const
 
 void DownloadTask::run(const std::string& url, const std::string& outputPath)
 {
-    brls::Logger::debug("DownloadTask::run started url={}", url);
 
     FILE* fp = fopen(outputPath.c_str(), "wb");
     if (!fp) {
@@ -300,8 +299,6 @@ void DownloadTask::run(const std::string& url, const std::string& outputPath)
     curl_easy_setopt(curl, CURLOPT_LOW_SPEED_TIME, 30L);
 
     CURLcode res = curl_easy_perform(curl);
-    brls::Logger::debug("DownloadTask::run curl_easy_perform returned {} ({})",
-        (int)res, curl_easy_strerror(res));
     curl_easy_cleanup(curl);
     fclose(fp);
 

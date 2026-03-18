@@ -120,8 +120,6 @@ void InstallPage::draw(NVGcontext* vg, int x, int y,
 {
     // ── advance indeterminate animation ──────────────────────────────
     retro_time_t now = cpu_features_get_time_usec();
-    if (m_lastFrameTime == 0)
-        brls::Logger::debug("InstallPage::draw: first frame");
     if (m_lastFrameTime != 0) {
         float dt = static_cast<float>(now - m_lastFrameTime) / 1000000.0f;
         m_animPhase += dt * 0.65f;  // ~1 sweep every 1.5 s
@@ -352,9 +350,7 @@ void InstallPage::pushInstallView(const lakka::Version& version)
     brls::StagedAppletFrame* staged = new brls::StagedAppletFrame();
     staged->setTitle("Installing Lakka " + version.version);
     staged->addStage(new InstallPage(staged, version));
-    brls::Logger::debug("InstallPage::pushInstallView: calling pushView");
     brls::Application::pushView(staged);
-    brls::Logger::debug("InstallPage::pushInstallView: pushView returned");
 }
 
 // ── speed helper ─────────────────────────────────────────────────────
@@ -419,16 +415,12 @@ void InstallPage::startDownload()
 
     m_downloadTask.start(m_version.url, m_downloadPath);
 
-    // Enable one-shot mainLoop trace to see where the first frame crashes
-    brls::Application::g_debugMainLoop = true;
-
     if (m_pollTask) {
         m_pollTask->stop();
         m_pollTask = nullptr;
     }
 
     m_pollTask = new InstallPollTask([this]() {
-        brls::Logger::debug("InstallPage: poll fired state={}", (int)m_state);
         switch (m_state)
         {
         case State::CONNECTING:
