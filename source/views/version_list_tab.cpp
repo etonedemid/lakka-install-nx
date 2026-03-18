@@ -138,6 +138,10 @@ void VersionListTab::populateList()
     brls::Logger::debug("VersionListTab[{}]::populateList {} versions", m_channel, m_versions.size());
     m_loaded = true;
 
+    // Clear focus before destroying the old views so Application::currentFocus
+    // is not left as a dangling pointer after clear() deletes them.
+    brls::Application::giveFocus(nullptr);
+
     // Remove loading item.  After clear() the pointer is dangling — null it so
     // nothing can accidentally call methods on the freed object.
     m_loadingItem = nullptr;
@@ -163,4 +167,7 @@ void VersionListTab::populateList()
 
         this->addView(item);
     }
+
+    // Give focus to the first item in the newly-built list.
+    brls::Application::giveFocus(this->getDefaultFocus());
 }
