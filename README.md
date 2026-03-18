@@ -123,6 +123,6 @@ install_path=sdmc:/
 
 ## License
 
-This project is provided as-is for personal/educational use.  
-Borealis is licensed under Apache-2.0.  The LZMA SDK is public domain.  
-Lakka is a third-party project — see <https://www.lakka.tv>.
+This project is licensed under **GNU GPLv3 (or later)**.  
+See [LICENSE](LICENSE) for project terms.  
+Third-party components keep their own licenses (for example, Borealis in `lib/borealis`).
