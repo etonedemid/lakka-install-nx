@@ -193,6 +193,7 @@ void ExtractTask::start(const std::string& archivePath,
         std::lock_guard<std::mutex> lk(m_mutex);
         m_currentFile.clear();
         m_errorMessage.clear();
+        m_extractedPaths.clear();
     }
 
     if (m_thread.joinable())
@@ -229,6 +230,8 @@ void ExtractTask::run(const std::string& archivePath,
         {
             std::lock_guard<std::mutex> lk(m_mutex);
             m_currentFile = name;
+            if (!name.empty())
+                m_extractedPaths.push_back(name);
         }
     };
 

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <vector>
 
 namespace extract {
 
@@ -35,6 +36,14 @@ public:
     size_t getCurrent()  const { return m_current.load(); }
     size_t getTotal()    const { return m_total.load(); }
 
+    // All file paths written during extraction (available after completion).
+    // Paths are relative (as stored in the archive, e.g. "lakka/SYSTEM").
+    std::vector<std::string> getExtractedPaths() const
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        return m_extractedPaths;
+    }
+
     std::string getCurrentFile() const;
     std::string getErrorMessage() const;
 
@@ -52,6 +61,7 @@ private:
     mutable std::mutex  m_mutex;
     std::string         m_currentFile;
     std::string         m_errorMessage;
+    std::vector<std::string> m_extractedPaths;
 };
 
 } // namespace extract

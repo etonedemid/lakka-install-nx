@@ -6,6 +6,7 @@
 #include <sstream>
 #include <iomanip>
 #include <sys/stat.h>
+#include <vector>
 
 extern config::Config g_config;
 
@@ -175,6 +176,26 @@ void InstallPage::willAppear(bool resetState)
     }
 
     m_progressDisplay->willAppear(resetState);
+
+    // Override the global + → quit action so that accidentally pressing +
+    // while the download/extraction is running does not kill the app.
+    // When already done/failed the button just pops the view like normal.
+    this->registerAction("Back", brls::Key::PLUS, [this]() -> bool {
+        if (m_state == State::DOWNLOADING || m_state == State::EXTRACTING) {
+            brls::Dialog* dlg = new brls::Dialog(
+                "A download is in progress.\nCancel and go back?");
+            dlg->addButton("Keep Downloading", [](brls::View*) {});
+            dlg->addButton("Cancel Download",  [](brls::View*) {
+                brls::Application::popView();
+            });
+            dlg->setCancelable(true);
+            dlg->open();
+        } else {
+            brls::Application::popView();
+        }
+        return true;
+    });
+
     startDownload();
 }
 
@@ -307,6 +328,21 @@ void InstallPage::startDownload()
                 g_config.setInstalledVersion(m_version.version);
                 g_config.setInstalledChannel(m_version.isDev ? "dev" : "stable");
                 g_config.save();
+
+                // Save manifest of extracted files for uninstall support.
+                // Paths from ExtractTask are archive-relative; prepend the
+                // install root so uninstall doesn't need to know it.
+                auto relPaths = m_extractTask.getExtractedPaths();
+                if (!relPaths.empty()) {
+                    std::vector<std::string> absPaths;
+                    absPaths.reserve(relPaths.size());
+                    std::string root = g_config.getInstallPath();
+                    if (root.empty()) root = config::INSTALL_DIR;
+                    if (!root.empty() && root.back() != '/') root += '/';
+                    for (const auto& p : relPaths)
+                        absPaths.push_back(root + p);
+                    g_config.saveManifest(absPaths);
+                }
 
                 // Remove downloaded archive
                 std::remove(m_downloadPath.c_str());

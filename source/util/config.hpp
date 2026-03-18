@@ -2,6 +2,7 @@
 
 #include <string>
 #include <map>
+#include <vector>
 
 namespace config {
 
@@ -10,6 +11,7 @@ constexpr const char* CONFIG_DIR  = "sdmc:/config/lakka-install-nx";
 constexpr const char* CONFIG_FILE = "sdmc:/config/lakka-install-nx/config.ini";
 constexpr const char* DOWNLOAD_DIR = "sdmc:/config/lakka-install-nx/download";
 constexpr const char* INSTALL_DIR  = "sdmc:/";
+constexpr const char* MANIFEST_FILE = "sdmc:/config/lakka-install-nx/manifest.txt";
 
 // Application configuration stored as a simple INI-like file.
 class Config {
@@ -19,6 +21,11 @@ public:
     // Load / save from CONFIG_FILE.
     bool load();
     bool save() const;
+
+    // Manifest: list of files/dirs written during the last install.
+    // Stored as one path per line in MANIFEST_FILE.
+    bool saveManifest(const std::vector<std::string>& paths) const;
+    std::vector<std::string> loadManifest() const;
 
     // Getters
     std::string getInstalledVersion()   const;

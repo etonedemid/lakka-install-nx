@@ -12,8 +12,8 @@ include $(DEVKITPRO)/libnx/switch_rules
 #---------------------------------------------------------------------------------
 # Application metadata
 #---------------------------------------------------------------------------------
-APP_TITLE	:=	Lakka Installer NX
-APP_AUTHOR	:=	Community
+APP_TITLE	:=	Lakka Installer
+APP_AUTHOR	:=	etonedemid
 APP_VERSION	:=	1.0.0
 
 #---------------------------------------------------------------------------------

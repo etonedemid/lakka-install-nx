@@ -189,4 +189,32 @@ bool Config::writeFile(const std::string& path) const
     return true;
 }
 
+// ── Manifest ───────────────────────────────────────────────────────────────────
+
+bool Config::saveManifest(const std::vector<std::string>& paths) const
+{
+    mkdirs(CONFIG_DIR);
+    std::ofstream ofs(MANIFEST_FILE);
+    if (!ofs.is_open())
+        return false;
+    for (const auto& p : paths)
+        ofs << p << "\n";
+    return true;
+}
+
+std::vector<std::string> Config::loadManifest() const
+{
+    std::vector<std::string> result;
+    std::ifstream ifs(MANIFEST_FILE);
+    if (!ifs.is_open())
+        return result;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = trim(line);
+        if (!line.empty())
+            result.push_back(line);
+    }
+    return result;
+}
+
 } // namespace config
