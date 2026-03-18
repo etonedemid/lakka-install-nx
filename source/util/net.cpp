@@ -39,11 +39,8 @@ static int curlProgressCb(void* clientp,
         if (ctx->task->isCancelled())
             return 1; // abort transfer
 
-        ctx->task->m_downloaded.store(static_cast<size_t>(dlnow));
-        ctx->task->m_total.store(static_cast<size_t>(dltotal));
-        if (dltotal > 0)
-            ctx->task->m_progress.store(
-                static_cast<float>(dlnow) / static_cast<float>(dltotal));
+        ctx->task->updateProgress(static_cast<size_t>(dlnow),
+                                   static_cast<size_t>(dltotal));
     }
 
     if (ctx->syncCb && dltotal > 0) {
@@ -173,6 +170,14 @@ void DownloadTask::start(const std::string& url, const std::string& outputPath)
 void DownloadTask::cancel()
 {
     m_cancelled.store(true);
+}
+
+void DownloadTask::updateProgress(size_t downloaded, size_t total)
+{
+    m_downloaded.store(downloaded);
+    m_total.store(total);
+    if (total > 0)
+        m_progress.store(static_cast<float>(downloaded) / static_cast<float>(total));
 }
 
 std::string DownloadTask::getErrorMessage() const

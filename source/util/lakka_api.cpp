@@ -26,7 +26,7 @@ static std::vector<Version> parseDirectoryListing(const std::string& html,
     // Match: href="(Lakka-Switch.aarch64-SOMETHING.7z)"
     // Capture group 1 = full filename
     std::regex linkRe(
-        R"(href="(Lakka-Switch\.aarch64-([^"]+)\.7z)")",
+        R"RE(href="(Lakka-Switch\.aarch64-([^"]+)\.7z)")RE",
         std::regex::icase);
 
     // Iterate over all matches

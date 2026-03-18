@@ -93,7 +93,7 @@ bool extract7z(const std::string& archivePath,
     }
     lookStream.bufSize    = kInputBufSize;
     lookStream.realStream = &archiveStream.vt;
-    LookToRead2_INIT(&lookStream);
+    LookToRead2_Init(&lookStream);
 
     CrcGenerateTable();
     SzArEx_Init(&db);

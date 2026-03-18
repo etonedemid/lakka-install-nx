@@ -4,4 +4,3 @@ build/
 *.elf
 *.pfs0
 *.nso
-lib/lzma/

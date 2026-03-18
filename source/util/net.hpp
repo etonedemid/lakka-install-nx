@@ -48,6 +48,9 @@ public:
     size_t   getDownloaded() const { return m_downloaded.load(); }
     size_t   getTotal()      const { return m_total.load(); }
 
+    // Update progress (called from progress callback)
+    void updateProgress(size_t downloaded, size_t total);
+
     std::string getErrorMessage() const;
 
 private:
