@@ -121,9 +121,3 @@ install_path=sdmc:/
 |---------|-----|
 | Stable  | `https://le.builds.lakka.tv/Switch.aarch64/` |
 | Nightly | `https://nightly.builds.lakka.tv/latest/Switch.aarch64/` |
-
-## License
-
-This project is licensed under **GNU GPLv3 (or later)**.  
-See [LICENSE](LICENSE) for project terms.  
-Third-party components keep their own licenses (for example, Borealis in `lib/borealis`).
