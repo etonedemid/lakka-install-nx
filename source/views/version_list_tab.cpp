@@ -32,13 +32,15 @@ VersionListTab::VersionListTab(const std::string& channel)
 
 VersionListTab::~VersionListTab()
 {
+    m_stopRequested.store(true);
+
     if (m_pollTask)
     {
         m_pollTask->stop();
         m_pollTask = nullptr;
     }
     if (m_fetchThread.joinable())
-        m_fetchThread.detach();
+        m_fetchThread.join();
 }
 
 void VersionListTab::willAppear(bool resetState)
@@ -70,32 +72,44 @@ void VersionListTab::fetchVersions()
         try
         {
             bool isDev = (m_channel == "nightly" || m_channel == "dev");
+            std::vector<lakka::Version> versions;
             if (isDev)
-                m_versions = lakka::fetchNightlyVersions();
+                versions = lakka::fetchNightlyVersions();
             else
-                m_versions = lakka::fetchStableVersions();
+                versions = lakka::fetchStableVersions();
+
+            if (m_stopRequested.load())
+                return;
 
             brls::Logger::debug("VersionListTab[{}] fetch thread got {} versions",
-                m_channel, m_versions.size());
+                m_channel, versions.size());
 
-            if (m_versions.empty())
+            if (versions.empty())
             {
                 m_errorMsg = "No versions found.";
                 m_fetchError.store(true);
             }
+            else
+            {
+                m_versions = std::move(versions);
+            }
         }
         catch (const std::exception& e)
         {
+            if (m_stopRequested.load()) return;
             brls::Logger::error("VersionListTab[{}] fetch thread exception: {}", m_channel, e.what());
             m_errorMsg = std::string("Error: ") + e.what();
             m_fetchError.store(true);
         }
         catch (...)
         {
+            if (m_stopRequested.load()) return;
             brls::Logger::error("VersionListTab[{}] fetch thread unknown exception", m_channel);
             m_errorMsg = "Unknown error fetching versions.";
             m_fetchError.store(true);
         }
+        if (m_stopRequested.load())
+            return;
         brls::Logger::debug("VersionListTab[{}] fetch thread done, error={}",
             m_channel, m_fetchError.load());
         m_fetching.store(false);
@@ -138,9 +152,20 @@ void VersionListTab::populateList()
     brls::Logger::debug("VersionListTab[{}]::populateList {} versions", m_channel, m_versions.size());
     m_loaded = true;
 
+    bool restoreFocusToList = false;
+    for (brls::View* focused = brls::Application::getCurrentFocus(); focused != nullptr; focused = focused->getParent())
+    {
+        if (focused == this)
+        {
+            restoreFocusToList = true;
+            break;
+        }
+    }
+
     // Clear focus before destroying the old views so Application::currentFocus
     // is not left as a dangling pointer after clear() deletes them.
-    brls::Application::giveFocus(nullptr);
+    if (restoreFocusToList)
+        brls::Application::giveFocus(nullptr);
 
     // Remove loading item.  After clear() the pointer is dangling — null it so
     // nothing can accidentally call methods on the freed object.
@@ -168,6 +193,7 @@ void VersionListTab::populateList()
         this->addView(item);
     }
 
-    // Give focus to the first item in the newly-built list.
-    brls::Application::giveFocus(this->getDefaultFocus());
+    // Only restore focus to this list if it was focused before rebuilding it.
+    if (restoreFocusToList)
+        brls::Application::giveFocus(this->getDefaultFocus());
 }

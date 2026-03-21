@@ -1,5 +1,6 @@
 #include "install_page.hpp"
 #include "../util/config.hpp"
+#include "home_tab.hpp"
 
 #include <borealis.hpp>
 #include <cstdio>
@@ -94,6 +95,14 @@ InstallPage::InstallPage(brls::StagedAppletFrame* frame,
     m_doneButton->getClickEvent()->subscribe([](brls::View* view) {
         brls::Application::popView();
     });
+
+    this->registerAction("Back", brls::Key::B, [this]() {
+        return this->handleExitAction();
+    });
+    this->m_frame->registerAction("", brls::Key::PLUS, []() {
+        return true;
+    }, true);
+    this->updateExitActionHints();
 }
 
 InstallPage::~InstallPage()
@@ -298,6 +307,40 @@ brls::View* InstallPage::getDefaultFocus()
     return this;
 }
 
+bool InstallPage::handleExitAction()
+{
+    if (m_state == State::EXTRACTING)
+        return true;
+
+    if (m_state == State::CONNECTING || m_state == State::DOWNLOADING)
+    {
+        brls::Dialog* dlg = new brls::Dialog(
+            "A download is in progress.\nCancel and go back?");
+        dlg->addButton("Keep Going", [](brls::View*) {});
+        dlg->addButton("Cancel & Back", [](brls::View*) {
+            brls::Application::popView();
+        });
+        dlg->setCancelable(true);
+        dlg->open();
+        return true;
+    }
+
+    brls::Application::popView();
+    return true;
+}
+
+void InstallPage::updateExitActionHints()
+{
+    std::string hint = "Back";
+
+    if (m_state == State::CONNECTING || m_state == State::DOWNLOADING)
+        hint = "Cancel";
+    else if (m_state == State::EXTRACTING)
+        hint = "Please Wait";
+
+    this->updateActionHint(brls::Key::B, hint);
+}
+
 void InstallPage::willAppear(bool resetState)
 {
     brls::Logger::debug("InstallPage::willAppear resetState={} downloadStarted={}",
@@ -308,25 +351,6 @@ void InstallPage::willAppear(bool resetState)
         brls::Logger::debug("InstallPage::willAppear: first call (pre-layout), skipping startDownload");
         return;
     }
-
-    // Override + → exit while a transfer is active
-    this->registerAction("Back", brls::Key::PLUS, [this]() -> bool {
-        if (m_state == State::CONNECTING ||
-            m_state == State::DOWNLOADING ||
-            m_state == State::EXTRACTING) {
-            brls::Dialog* dlg = new brls::Dialog(
-                "A transfer is in progress.\nCancel and go back?");
-            dlg->addButton("Keep Going",      [](brls::View*) {});
-            dlg->addButton("Cancel & Back",   [](brls::View*) {
-                brls::Application::popView();
-            });
-            dlg->setCancelable(true);
-            dlg->open();
-        } else {
-            brls::Application::popView();
-        }
-        return true;
-    });
 
     startDownload();
 }
@@ -412,6 +436,7 @@ void InstallPage::startDownload()
     m_titleLabel->setText("Lakka " + m_version.version);
     m_statsLabel->setText("Connecting...");
     m_detailLabel->setText(m_version.filename);
+    updateExitActionHints();
 
     m_downloadTask.start(m_version.url, m_downloadPath);
 
@@ -469,6 +494,7 @@ void InstallPage::startDownload()
                 brls::Logger::error("InstallPage: download error: {}",
                     m_downloadTask.getErrorMessage());
                 m_state = State::ERROR;
+                updateExitActionHints();
                 m_stageLabel->setText("Download Failed");
                 m_titleLabel->setText("Lakka " + m_version.version);
                 m_statsLabel->setText(m_downloadTask.getErrorMessage());
@@ -477,6 +503,7 @@ void InstallPage::startDownload()
                 if (m_pollTask) m_pollTask->pause();
             } else if (m_downloadTask.isCancelled()) {
                 m_state = State::ERROR;
+                updateExitActionHints();
                 m_stageLabel->setText("Cancelled");
                 m_statsLabel->setText("");
                 m_detailLabel->setText("");
@@ -517,8 +544,6 @@ void InstallPage::startDownload()
             m_statsLabel->setText(stats.str());
 
             std::string fname = m_extractTask.getCurrentFile();
-            auto slash = fname.rfind('/');
-            if (slash != std::string::npos) fname = fname.substr(slash + 1);
 
             std::ostringstream detail;
             if (!fname.empty()) detail << fname;
@@ -535,10 +560,11 @@ void InstallPage::startDownload()
             if (m_extractTask.isComplete() && !m_extractTask.hasError()) {
                 brls::Logger::debug("InstallPage: extract complete");
                 m_state = State::DONE;
+                updateExitActionHints();
                 m_progressPct = 100.0f;
                 m_stageLabel->setText("Complete");
                 m_titleLabel->setText("Installation Complete!");
-                m_statsLabel->setText(m_version.version + " installed successfully");
+                m_statsLabel->setText("Verifying installed version...");
                 m_detailLabel->setText("");
                 m_doneButton->show([](){});
                 if (m_pollTask) m_pollTask->pause();
@@ -546,6 +572,25 @@ void InstallPage::startDownload()
                 g_config.setInstalledVersion(m_version.version);
                 g_config.setInstalledChannel(m_version.isDev ? "dev" : "stable");
                 g_config.save();
+
+                std::string installedVersion = g_config.getInstalledVersion();
+                std::string installedChannel = g_config.getInstalledChannel();
+                bool verified = installedVersion == m_version.version &&
+                    installedChannel == (m_version.isDev ? "dev" : "stable");
+
+                if (verified)
+                {
+                    m_statsLabel->setText(installedVersion + " installed successfully");
+                    HomeTab::notifyInstallStateChanged(
+                        "Installed " + installedVersion + " (" + installedChannel + ")");
+                }
+                else
+                {
+                    m_statsLabel->setText("Install finished, but version check failed");
+                    m_detailLabel->setText("Expected " + m_version.version +
+                        ", found " + (installedVersion.empty() ? std::string("nothing") : installedVersion));
+                    HomeTab::notifyInstallStateChanged("Install finished, but version verification failed");
+                }
 
                 // Save manifest
                 auto relPaths = m_extractTask.getExtractedPaths();
@@ -565,6 +610,7 @@ void InstallPage::startDownload()
                 brls::Logger::error("InstallPage: extract error: {}",
                     m_extractTask.getErrorMessage());
                 m_state = State::ERROR;
+                updateExitActionHints();
                 m_stageLabel->setText("Extraction Failed");
                 m_statsLabel->setText(m_extractTask.getErrorMessage());
                 m_detailLabel->setText("");
@@ -585,6 +631,7 @@ void InstallPage::startDownload()
 void InstallPage::startExtract()
 {
     m_state       = State::EXTRACTING;
+    updateExitActionHints();
     m_progressPct = 0.0f;
     m_extractLastIdx    = (size_t)-1;
     m_extractStuckSince = 0;

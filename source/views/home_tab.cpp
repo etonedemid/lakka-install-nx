@@ -9,48 +9,15 @@
 
 extern config::Config g_config;
 
-// ── Poll task helper ─────────────────────────────────────────────────
-class HomeTabPollTask : public brls::RepeatingTask
-{
-  public:
-    HomeTabPollTask(std::function<void()> cb)
-        : brls::RepeatingTask(100) // 100 ms
-        , m_cb(std::move(cb))
-    {}
-
-    void run(retro_time_t currentTime) override
-    {
-        brls::RepeatingTask::run(currentTime);
-        if (m_cb) m_cb();
-    }
-
-  private:
-    std::function<void()> m_cb;
-};
+HomeTab* HomeTab::s_instance = nullptr;
 
 // ── HomeTab ──────────────────────────────────────────────────────────
 HomeTab::HomeTab()
 {
-    // Current installation info
-    std::string ver = g_config.getInstalledVersion();
-    std::string ch  = g_config.getInstalledChannel();
+    s_instance = this;
 
     m_itemInstalledVersion = new brls::ListItem("Installed Version",
         "The currently installed Lakka version on this SD card.");
-    if (!ver.empty())
-        m_itemInstalledVersion->setValue(ver + " (" + ch + ")");
-    else
-        m_itemInstalledVersion->setValue("Not installed");
-
-    // Check for updates button
-    m_itemCheckUpdate = new brls::ListItem("Check for Updates",
-        "Fetch the latest version info from Lakka servers");
-    m_itemCheckUpdate->getClickEvent()->subscribe([this](brls::View* view) {
-        if (m_fetching.load())
-            return;
-        m_itemCheckUpdate->setValue("Checking...");
-        this->checkForUpdate();
-    });
 
     // Status item (used for messages)
     m_itemStatus = new brls::ListItem("Status");
@@ -58,7 +25,7 @@ HomeTab::HomeTab()
 
     // Uninstall Lakka
     m_itemUninstall = new brls::ListItem("Uninstall Lakka",
-        "Remove all Lakka files from the SD card using the install manifest.");
+        "Remove all Lakka files");
     m_itemUninstall->getClickEvent()->subscribe([this](brls::View*) {
         this->confirmUninstall();
     });
@@ -68,107 +35,45 @@ HomeTab::HomeTab()
     this->addView(m_itemInstalledVersion);
     this->addView(new brls::ListItemGroupSpacing(true));
     this->addView(new brls::Header("Actions"));
-    this->addView(m_itemCheckUpdate);
     this->addView(m_itemUninstall);
     this->addView(new brls::ListItemGroupSpacing(true));
     this->addView(m_itemStatus);
+
+    this->refreshInstalledInfo();
 }
 
 HomeTab::~HomeTab()
 {
-    if (m_pollTask)
-    {
-        m_pollTask->stop();   // marks for deletion by TaskManager
-        m_pollTask = nullptr;
-    }
-    if (m_fetchThread.joinable())
-        m_fetchThread.detach();
+    if (s_instance == this)
+        s_instance = nullptr;
+
+
 }
 
-void HomeTab::checkForUpdate()
+void HomeTab::notifyInstallStateChanged(const std::string& status)
 {
-    if (m_fetching.load())
-        return;
+    if (s_instance)
+        s_instance->refreshInstalledInfo(status);
+}
 
-    brls::Logger::debug("HomeTab::checkForUpdate starting thread");
-    m_fetching.store(true);
-    m_fetchDone.store(false);
-    m_fetchError.store(false);
+void HomeTab::refreshInstalledInfo(const std::string& status)
+{
+    std::string ver = g_config.getInstalledVersion();
+    std::string ch  = g_config.getInstalledChannel();
 
-    if (m_fetchThread.joinable())
-        m_fetchThread.detach();
-
-    m_fetchThread = std::thread([this]() {
-        brls::Logger::debug("HomeTab fetch thread entered");
-        try
-        {
-            auto versions = lakka::fetchStableVersions();
-            brls::Logger::debug("HomeTab fetch thread got {} versions", versions.size());
-            if (versions.empty())
-            {
-                m_fetchError.store(true);
-            }
-            else
-            {
-                m_fetchedVersions = versions;
-                auto latest = lakka::getLatest(versions);
-                m_latestVersionStr = latest.version;
-                m_latestFilename   = latest.filename;
-                m_latestUrl        = latest.url;
-                m_latestIsDev      = latest.isDev;
-            }
-        }
-        catch (...)
-        {
-            brls::Logger::error("HomeTab fetch thread unknown exception");
-            m_fetchError.store(true);
-        }
-        brls::Logger::debug("HomeTab fetch thread done, error={}", m_fetchError.load());
-        m_fetching.store(false);
-        m_fetchDone.store(true);
-    });
-
-    // Start poll timer — stop any previous task first
-    if (m_pollTask)
+    if (!ver.empty())
     {
-        m_pollTask->stop();
-        m_pollTask = nullptr;
+        m_itemInstalledVersion->setValue(ver + " (" + ch + ")");
+        m_itemStatus->setValue(status);
     }
-
-    m_pollTask = new HomeTabPollTask([this]() {
-        if (!m_fetchDone.load())
-            return;
-
-        // Pause from within callback (cannot stop/delete self)
-        if (m_pollTask)
-            m_pollTask->pause();
-
-        if (m_fetchError.load())
-        {
-            m_itemCheckUpdate->setValue("Error");
-            m_itemStatus->setValue("Failed to fetch versions");
-            return;
-        }
-
-        std::string installed = g_config.getInstalledVersion();
-        if (installed.empty())
-        {
-            m_itemCheckUpdate->setValue("Latest: " + m_latestVersionStr);
-            m_itemStatus->setValue("Not installed — go to Stable or Nightly tab to install");
-        }
-        else if (installed == m_latestVersionStr)
-        {
-            m_itemCheckUpdate->setValue("Up to date");
-            m_itemStatus->setValue("Running latest: " + installed);
-        }
+    else
+    {
+        m_itemInstalledVersion->setValue("Not installed");
+        if (status == "Ready")
+            m_itemStatus->setValue("Not installed");
         else
-        {
-            m_itemCheckUpdate->setValue("Update: " + m_latestVersionStr);
-            m_itemStatus->setValue("Installed: " + installed +
-                                   " → Available: " + m_latestVersionStr);
-        }
-    });
-    m_pollTask->start();
+            m_itemStatus->setValue(status);
+    }
 }
 
 void HomeTab::confirmUninstall()
@@ -187,19 +92,19 @@ void HomeTab::confirmUninstall()
             "No install manifest found.\n"
             "Cannot automatically remove Lakka files.\n"
             "Please delete the 'lakka' folder from your SD card manually.");
-        dlg->addButton("OK", [](brls::View*) {});
+        dlg->addButton("OK", [dlg](brls::View*) { dlg->close(); });
         dlg->setCancelable(true);
         dlg->open();
         return;
     }
 
     brls::Dialog* dlg = new brls::Dialog(
-        "Remove Lakka " + ver + " from the SD card?\n" +
+        "Remove Lakka " + ver + "?\n" +
         std::to_string(manifest.size()) + " files will be deleted.");
-    dlg->addButton("Uninstall", [this](brls::View*) {
-        this->doUninstall();
+    dlg->addButton("Uninstall", [this, dlg](brls::View*) {
+        dlg->close([this]() { this->doUninstall(); });
     });
-    dlg->addButton("Cancel", [](brls::View*) {});
+    dlg->addButton("Cancel", [dlg](brls::View*) { dlg->close(); });
     dlg->setCancelable(true);
     dlg->open();
 }
@@ -229,9 +134,7 @@ void HomeTab::doUninstall()
     g_config.setInstalledChannel("");
     g_config.save();
 
-    // Refresh the installed version label
-    m_itemInstalledVersion->setValue("Not installed");
-    m_itemStatus->setValue("Removed " + std::to_string(removed) + " of " +
+    this->refreshInstalledInfo("Removed " + std::to_string(removed) + " of " +
         std::to_string(manifest.size()) + " files.");
     brls::Logger::debug("HomeTab::doUninstall removed {}/{} entries", removed, manifest.size());
 }

@@ -25,12 +25,13 @@ class VersionListTab : public brls::List
     bool        m_loaded = false;
 
     // Async state
-    std::thread           m_fetchThread;
-    std::atomic<bool>     m_fetching{false};
-    std::atomic<bool>     m_fetchDone{false};
-    std::atomic<bool>     m_fetchError{false};
+    std::thread            m_fetchThread;
+    std::atomic<bool>      m_fetching{false};
+    std::atomic<bool>      m_fetchDone{false};
+    std::atomic<bool>      m_fetchError{false};
+    std::atomic<bool>      m_stopRequested{false};
     std::vector<lakka::Version> m_versions;
-    std::string           m_errorMsg;
+    std::string            m_errorMsg;
 
     brls::RepeatingTask*  m_pollTask = nullptr;
 

@@ -70,7 +70,8 @@ static void ensureParentDir(const std::string& filePath)
 
 bool extract7z(const std::string& archivePath,
                const std::string& destDir,
-               ProgressCallback progressCb)
+               ProgressCallback progressCb,
+               std::vector<std::string>* extractedPathsOut)
 {
     CFileInStream archiveStream;
     CLookToRead2 lookStream;
@@ -133,6 +134,8 @@ bool extract7z(const std::string& archivePath,
 
         if (isDir) {
             mkdirs(fullPath);
+            if (extractedPathsOut)
+                extractedPathsOut->push_back(name);
             continue;
         }
 
@@ -176,6 +179,9 @@ bool extract7z(const std::string& archivePath,
             }
         }
         fclose(outFile);
+
+        if (extractedPathsOut)
+            extractedPathsOut->push_back(name);
     }
 
     ISzAlloc_Free(&allocImp, outBuffer);
@@ -270,19 +276,25 @@ void ExtractTask::run(const std::string& archivePath,
                       const std::string& destDir)
 {
     auto cb = [this](size_t cur, size_t total, const std::string& name) {
-        m_current.store(cur);
+        m_current.store(cur + 1);
         m_total.store(total);
         if (total > 0)
-            m_progress.store(static_cast<float>(cur) / static_cast<float>(total));
+            m_progress.store(static_cast<float>(cur + 1) / static_cast<float>(total));
         {
             std::lock_guard<std::mutex> lk(m_mutex);
             m_currentFile = name;
-            if (!name.empty())
-                m_extractedPaths.push_back(name);
         }
     };
 
-    bool ok = extract7z(archivePath, destDir, cb);
+    std::vector<std::string> extractedPaths;
+
+    bool ok = extract7z(archivePath, destDir, cb, &extractedPaths);
+
+    if (ok)
+    {
+        std::lock_guard<std::mutex> lk(m_mutex);
+        m_extractedPaths = std::move(extractedPaths);
+    }
 
     if (!ok && !m_cancelled.load()) {
         std::lock_guard<std::mutex> lk(m_mutex);

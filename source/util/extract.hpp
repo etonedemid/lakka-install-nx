@@ -16,7 +16,8 @@ using ProgressCallback = std::function<void(size_t, size_t, const std::string&)>
 // Returns true on success.
 bool extract7z(const std::string& archivePath,
                const std::string& destDir,
-               ProgressCallback progressCb = nullptr);
+               ProgressCallback progressCb = nullptr,
+               std::vector<std::string>* extractedPathsOut = nullptr);
 
 // Async extraction task
 class ExtractTask {

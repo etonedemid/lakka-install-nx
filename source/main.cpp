@@ -33,7 +33,7 @@ int main(int argc, char* argv[])
 
     // Root TabFrame
     brls::TabFrame* rootFrame = new brls::TabFrame();
-    rootFrame->setTitle("Lakka Installer NX");
+    rootFrame->setTitle("Lakka Installer");
     rootFrame->setIcon(BOREALIS_ASSET("icon/icon.jpg"));
 
     // Tabs
@@ -42,7 +42,7 @@ int main(int argc, char* argv[])
     rootFrame->addSeparator();
     rootFrame->addTab("Nightly", new VersionListTab("nightly"));
     rootFrame->addSeparator();
-    rootFrame->addTab("Settings", new SettingsTab());
+    rootFrame->addTab("Info", new SettingsTab());
 
     // Push the root frame
     brls::Application::pushView(rootFrame);

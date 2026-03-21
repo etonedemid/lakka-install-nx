@@ -39,6 +39,8 @@ class InstallPage : public brls::View
     void startDownload();
     void startExtract();
     void updateSpeed(size_t currentBytes);
+    bool handleExitAction();
+    void updateExitActionHints();
 
     brls::StagedAppletFrame* m_frame;
     lakka::Version           m_version;
